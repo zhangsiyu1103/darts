@@ -11,9 +11,13 @@ The algorithm is based on continuous relaxation and gradient descent in the arch
 
 ## Requirements
 ```
+Python >= 3.5.5, PyTorch >= 1.4.0, torchvision >= 0.5.0
+```
+This only works for cnn data, rnn still requires:
+```
 Python >= 3.5.5, PyTorch == 0.3.1, torchvision == 0.2.0
 ```
-NOTE: PyTorch 0.4 is not supported at this moment and would lead to OOM.
+
 
 ## Datasets
 Instructions for acquiring PTB and WT2 can be found [here](https://github.com/salesforce/awd-lstm-lm). While CIFAR-10 can be automatically downloaded by torchvision, ImageNet needs to be manually downloaded (preferably to a SSD) following the instructions [here](https://github.com/pytorch/examples/tree/master/imagenet).
