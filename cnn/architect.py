@@ -1,11 +1,15 @@
 import torch
 import numpy as np
 import torch.nn as nn
+import time
 from torch.autograd import Variable
 
 
-def _concat(xs):
-  return torch.cat([x.view(-1) for x in xs])
+def _concat(xs, idx = None):
+  if idx == None:
+    return torch.cat([x.view(-1) for x in xs])
+  else:
+    return torch.cat([x.view(-1) for i, x in enumerate(xs) if i in idx])
 
 
 class Architect(object):
@@ -17,76 +21,145 @@ class Architect(object):
     self.optimizer = torch.optim.Adam(self.model.arch_parameters(),
         lr=args.arch_learning_rate, betas=(0.5, 0.999), weight_decay=args.arch_weight_decay)
 
-  def _compute_unrolled_model(self, input, target, eta, network_optimizer):
-    loss = self.model._loss(input, target)
-    theta = _concat(self.model.parameters()).data
+  def _compute_unrolled_model(self, input, target, eta, network_optimizer, grow = False):
+    loss = self.model._loss(input, target, grow)
+    grads_all = torch.autograd.grad(loss, self.model.parameters(), allow_unused=True)
+    idx_use = tuple(i for i in range(len(grads_all)) if grads_all[i] is not None )
+    theta = _concat(self.model.parameters(),idx_use).data
     try:
-      moment = _concat(network_optimizer.state[v]['momentum_buffer'] for v in self.model.parameters()).mul_(self.network_momentum)
+      moment = _concat(network_optimizer.state[v]['momentum_buffer'] for i,v in enumerate(self.model.parameters()) if i in idx_use).mul_(self.network_momentum)
     except:
       moment = torch.zeros_like(theta)
-    dtheta = _concat(torch.autograd.grad(loss, self.model.parameters())).data + self.network_weight_decay*theta
-    unrolled_model = self._construct_model_from_theta(theta.sub(moment+dtheta, alpha = eta))
+    dtheta = _concat(grads_all, idx_use).data + self.network_weight_decay*theta
+    unrolled_model = self._construct_model_from_theta(theta.sub(moment+dtheta, alpha = eta),idx_use)
     return unrolled_model
 
-  def step(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer, unrolled):
+  def step(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer, unrolled, grow = False):
     self.optimizer.zero_grad()
-    if unrolled:
-        self._backward_step_unrolled(input_train, target_train, input_valid, target_valid, eta, network_optimizer)
-    else:
-        self._backward_step(input_valid, target_valid)
-    self.optimizer.step()
 
-  def _backward_step(self, input_valid, target_valid):
-    loss = self.model._loss(input_valid, target_valid)
+    # set to small val for evaluare
+    #if grow:
+    #  with torch.no_grad():
+    #    n_row = self.model.normal_indicator.size(0)
+    #    n_col = self.model.normal_indicator.size(1)
+    #    for i in range(n_row):
+    #        for j in range(n_col):
+    #            if self.model.normal_indicator[i,j]==0:
+    #                self.model.alphas_normal[i,j] = np.log(0.01)
+
+    #    n_row = self.model.reduce_indicator.size(0)
+    #    n_col = self.model.reduce_indicator.size(1)
+    #    for i in range(n_row):
+    #        for j in range(n_col):
+    #            if self.model.reduce_indicator[i,j]==0:
+    #                self.model.alphas_reduce[i,j] = np.log(0.01)
+
+    if unrolled:
+        self._backward_step_unrolled(input_train, target_train, input_valid, target_valid, eta, network_optimizer, grow)
+    else:
+        self._backward_step(input_valid, target_valid, grow)
+    if not grow:
+        self.optimizer.step()
+    else:
+        # grow normal
+        n_row = self.model.normal_indicator.size(0)
+        n_col = self.model.normal_indicator.size(1)
+        max_grad = 0
+        normal_loc = None
+        for i in range(n_row):
+            for j in range(n_col):
+                if self.model.normal_indicator[i,j]==0:
+                    cur_grad = self.model.alphas_normal.grad[i,j]
+                    if abs(cur_grad) > max_grad:
+                        max_grad = cur_grad
+                        normal_loc = (i,j)
+                    # change val back
+                    #with torch.no_grad():
+                    #    self.model.alphas_normal[i,j] = 0
+
+
+        n_row = self.model.reduce_indicator.size(0)
+        n_col = self.model.reduce_indicator.size(1)
+        max_grad = 0
+        reduce_loc = None
+        for i in range(n_row):
+            for j in range(n_col):
+                if self.model.reduce_indicator[i,j]==0:
+                    cur_grad = self.model.alphas_reduce.grad[i,j]
+                    if abs(cur_grad) > max_grad:
+                        max_grad = cur_grad
+                        reduce_loc = (i,j)
+                    #with torch.no_grad():
+                    #    self.model.alphas_reduce[i,j] = 0
+
+        #print("normal_alphas: ", self.model.alphas_normal.grad)
+        #print("reduce_alphas: ", self.model.alphas_reduce.grad)
+        print("activated normal_idx: ", normal_loc)
+        print("activated reduce_idx: ", reduce_loc)
+        self.model.activate(normal_loc, reduce_loc)
+
+
+  def _backward_step(self, input_valid, target_valid, grow):
+    loss = self.model._loss(input_valid, target_valid, grow)
     loss.backward()
 
-  def _backward_step_unrolled(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer):
-    unrolled_model = self._compute_unrolled_model(input_train, target_train, eta, network_optimizer)
-    unrolled_loss = unrolled_model._loss(input_valid, target_valid)
+  def _backward_step_unrolled(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer, grow):
+    unrolled_model = self._compute_unrolled_model(input_train, target_train, eta, network_optimizer, grow)
+    unrolled_loss = unrolled_model._loss(input_valid, target_valid, grow)
 
     unrolled_loss.backward()
     dalpha = [v.grad for v in unrolled_model.arch_parameters()]
-    vector = [v.grad.data for v in unrolled_model.parameters()]
-    implicit_grads = self._hessian_vector_product(vector, input_train, target_train)
+    vector = []
+    for i,v in enumerate(unrolled_model.parameters()):
+      if v.grad is not None:
+        vector.append(v.grad.data)
+      else:
+        vector.append(None)
+
+    implicit_grads = self._hessian_vector_product(vector, input_train, target_train, grow=grow)
 
     for g, ig in zip(dalpha, implicit_grads):
       g.data.sub_(ig.data, alpha = eta)
 
     for v, g in zip(self.model.arch_parameters(), dalpha):
       if v.grad is None:
-        v.grad = Variable(g.data)
+        v.grad = g.data
       else:
         v.grad.data.copy_(g.data)
 
 
-  def _construct_model_from_theta(self, theta):
+  def _construct_model_from_theta(self, theta, idx):
     model_new = self.model.new()
-    model_dict = self.model.state_dict()
 
     params, offset = {}, 0
-    for k, v in self.model.named_parameters():
-      v_length = np.prod(v.size())
-      params[k] = theta[offset: offset+v_length].view(v.size())
-      offset += v_length
+    for i, (k, v) in enumerate(self.model.named_parameters()):
+      if i in idx:
+        v_length = np.prod(v.size())
+        params[k] = theta[offset: offset+v_length].view(v.size())
+        offset += v_length
     assert offset == len(theta)
-    model_dict.update(params)
-    model_new.load_state_dict(model_dict)
+    #use self defined function to accelerate
+    model_new.load_my_state_dict(params)
     return model_new.cuda()
 
-  def _hessian_vector_product(self, vector, input, target, r=1e-2):
-    R = r / _concat(vector).norm()
+  def _hessian_vector_product(self, vector, input, target, r=1e-2, grow = False):
+    vector_concat = list(filter(lambda x: x is not None, vector))
+    R = r / _concat(vector_concat).norm()
     for p, v in zip(self.model.parameters(), vector):
-      p.data.add_(v, alpha = R)
-    loss = self.model._loss(input, target)
-    grads_p = torch.autograd.grad(loss, self.model.arch_parameters())
+      if v is not None:
+        p.data.add_(v, alpha = R)
+    loss = self.model._loss(input, target, grow)
+    grads_p = torch.autograd.grad(loss, self.model.arch_parameters(), allow_unused = True)
 
     for p, v in zip(self.model.parameters(), vector):
-      p.data.sub_(v, alpha = 2*R)
-    loss = self.model._loss(input, target)
-    grads_n = torch.autograd.grad(loss, self.model.arch_parameters())
+      if v is not None:
+        p.data.sub_(v, alpha = 2*R)
+    loss = self.model._loss(input, target, grow)
+    grads_n = torch.autograd.grad(loss, self.model.arch_parameters(), allow_unused = True)
 
     for p, v in zip(self.model.parameters(), vector):
-      p.data.add_(v, alpha = R)
+      if v is not None:
+        p.data.add_(v, alpha = R)
 
     return [(x-y).div_(2*R) for x, y in zip(grads_p, grads_n)]
 

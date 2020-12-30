@@ -53,6 +53,7 @@ fh = logging.FileHandler(os.path.join(args.save, 'log.txt'))
 fh.setFormatter(logging.Formatter(log_format))
 logging.getLogger().addHandler(fh)
 
+t_record={"arch":0,"train":0}
 
 CIFAR_CLASSES = 10
 
@@ -106,27 +107,61 @@ def main():
   architect = Architect(model, args)
 
   for epoch in range(args.epochs):
-    scheduler.step()
-    lr = scheduler.get_lr()[0]
+    lr = scheduler.get_last_lr()[0]
     logging.info('epoch %d lr %e', epoch, lr)
 
     genotype = model.genotype()
     logging.info('genotype = %s', genotype)
 
-    print(F.softmax(model.alphas_normal, dim=-1))
-    print(F.softmax(model.alphas_reduce, dim=-1))
+    alphas_reduce = torch.where(model.alphas_reduce==0,torch.FloatTensor([float("-inf")]).cuda(),model.alphas_reduce)
+    alphas_normal = torch.where(model.alphas_normal==0,torch.FloatTensor([float("-inf")]).cuda(),model.alphas_normal)
+    print(F.softmax(alphas_normal, dim=-1))
+    print(F.softmax(alphas_reduce, dim=-1))
+
+    # grow
+    grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
+
+   # print("post grow")
+   # alphas_reduce = torch.where(model.alphas_reduce==0,torch.FloatTensor([float("-inf")]).cuda(),model.alphas_reduce)
+   # alphas_normal = torch.where(model.alphas_normal==0,torch.FloatTensor([float("-inf")]).cuda(),model.alphas_normal)
+   # print(F.softmax(alphas_normal, dim=-1))
+   # print(F.softmax(alphas_reduce, dim=-1))
+
 
     # training
     train_acc, train_obj = train(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
     logging.info('train_acc %f', train_acc)
+
+    #scheduler update
+    scheduler.step()
 
 
     # validation
     valid_acc, valid_obj = infer(valid_queue, model, criterion)
     logging.info('valid_acc %f', valid_acc)
 
+
+
+
     utils.save(model, os.path.join(args.save, 'weights.pt'))
 
+def grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
+
+  for step, (input, target) in enumerate(train_queue):
+    print("grow")
+    model.train()
+
+    input = Variable(input, requires_grad=False).cuda()
+    target = Variable(target, requires_grad=False).cuda(non_blocking=True)
+
+    # get a random minibatch from the search queue with replacement
+    input_search, target_search = next(iter(valid_queue))
+    input_search = Variable(input_search, requires_grad=False).cuda()
+    target_search = Variable(target_search, requires_grad=False).cuda(non_blocking=True)
+    architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled, grow = True)
+    break
+
+  print("grow done")
 
 def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
   objs = utils.AvgrageMeter()
@@ -144,9 +179,10 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
     input_search, target_search = next(iter(valid_queue))
     input_search = Variable(input_search, requires_grad=False).cuda()
     target_search = Variable(target_search, requires_grad=False).cuda(non_blocking=True)
-
+    arch_start = time.time()
     architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled)
-
+    #train_time
+    train_start = time.time()
     optimizer.zero_grad()
     logits = model(input)
     loss = criterion(logits, target)
@@ -159,7 +195,12 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
     objs.update(loss.item(), n)
     top1.update(prec1.item(), n)
     top5.update(prec5.item(), n)
+    end = time.time()
+    t_record["arch"]+=(train_start-arch_start)
+    t_record["train"]+=(end-train_start)
+    #model.random_activate()
 
+    torch.save(t_record, "train_time.pth")
     if step % args.report_freq == 0:
       logging.info('train %03d %e %f %f', step, objs.avg, top1.avg, top5.avg)
 

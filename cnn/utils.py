@@ -37,6 +37,26 @@ def accuracy(output, target, topk=(1,)):
   return res
 
 
+def indicator(active_list, row, col):
+    indicator = torch.zeros([row,col])
+
+    for idx in active_list:
+        r_idx = idx // col
+        c_idx = idx - r_idx*col
+        indicator[r_idx, c_idx]=1
+
+    return indicator
+
+
+def mask_softmax(A, dim):
+  A_max = torch.max(A,dim=dim,keepdim=True)[0]
+  A_exp = torch.exp(A-A_max)
+  A_exp = A_exp * (~(A == 0)).float() # this step masks
+  A_softmax = A_exp / torch.sum(A_exp,dim=dim,keepdim=True)
+  return A_softmax
+
+
+
 class Cutout(object):
     def __init__(self, length):
         self.length = length
