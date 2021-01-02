@@ -41,6 +41,7 @@ parser.add_argument('--train_portion', type=float, default=0.5, help='portion of
 parser.add_argument('--unrolled', action='store_true', default=False, help='use one-step unrolled validation loss')
 parser.add_argument('--arch_learning_rate', type=float, default=3e-4, help='learning rate for arch encoding')
 parser.add_argument('--arch_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
+parser.add_argument('--darts', action='store_true', default=False, help='use original darts code')
 args = parser.parse_args()
 
 args.save = 'search-{}-{}'.format(args.save, time.strftime("%Y%m%d-%H%M%S"))
@@ -74,7 +75,7 @@ def main():
 
   criterion = nn.CrossEntropyLoss()
   criterion = criterion.cuda()
-  model = Network(args.init_channels, CIFAR_CLASSES, args.layers, criterion)
+  model = Network(args.init_channels, CIFAR_CLASSES, args.layers, criterion, darts = args.darts)
   model = model.cuda()
   logging.info("param size = %fMB", utils.count_parameters_in_MB(model))
 
@@ -113,13 +114,18 @@ def main():
     genotype = model.genotype()
     logging.info('genotype = %s', genotype)
 
-    alphas_reduce = torch.where(model.alphas_reduce==0,torch.FloatTensor([float("-inf")]).cuda(),model.alphas_reduce)
-    alphas_normal = torch.where(model.alphas_normal==0,torch.FloatTensor([float("-inf")]).cuda(),model.alphas_normal)
-    print(F.softmax(alphas_normal, dim=-1))
-    print(F.softmax(alphas_reduce, dim=-1))
+    if not args.darts:
+      alphas_reduce = torch.where(model.alphas_reduce==0,torch.FloatTensor([float("-inf")]).cuda(),model.alphas_reduce)
+      alphas_normal = torch.where(model.alphas_normal==0,torch.FloatTensor([float("-inf")]).cuda(),model.alphas_normal)
+      print(F.softmax(alphas_normal, dim=-1))
+      print(F.softmax(alphas_reduce, dim=-1))
+    else:
+      print(F.softmax(model.alphas_normal, dim=-1))
+      print(F.softmax(model.alphas_reduce, dim=-1))
 
     # grow
-    grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
+    if not args.darts:
+      grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
 
    # print("post grow")
    # alphas_reduce = torch.where(model.alphas_reduce==0,torch.FloatTensor([float("-inf")]).cuda(),model.alphas_reduce)
@@ -180,7 +186,7 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
     input_search = Variable(input_search, requires_grad=False).cuda()
     target_search = Variable(target_search, requires_grad=False).cuda(non_blocking=True)
     arch_start = time.time()
-    architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled)
+    architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled, darts = args.darts)
     #train_time
     train_start = time.time()
     optimizer.zero_grad()
