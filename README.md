@@ -12,7 +12,7 @@ Python >= 3.5.5, PyTorch == 0.3.1, torchvision == 0.2.0
 ## Datasets
 Instructions for acquiring PTB and WT2 can be found [here](https://github.com/salesforce/awd-lstm-lm). While CIFAR-10 can be automatically downloaded by torchvision, ImageNet needs to be manually downloaded (preferably to a SSD) following the instructions [here](https://github.com/pytorch/examples/tree/master/imagenet).
 
-**Sampled CIFAR10** ([new_cifar.pth](https://docs.google.com/document/d/1f6EZSTxSAcVi_IQ1_vPLQB4p93By6jaN4y1vypf4Yms/edit?usp=sharing))
+**Sampled CIFAR10** ([new_cifar.pth](https://drive.google.com/file/d/1p7EKOVMTCCArKDzATCMnF0CpVdxayDMa/view?usp=sharing))
 This file should be placed in directory ```cnn```
 
 
