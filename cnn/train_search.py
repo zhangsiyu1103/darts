@@ -12,7 +12,7 @@ import torch.utils
 import torch.nn.functional as F
 import torchvision.datasets as dset
 import torch.backends.cudnn as cudnn
-
+from datasets import TrainDataset
 from torch.autograd import Variable
 from model_search import Network
 from architect import Architect
@@ -86,7 +86,8 @@ def main():
       weight_decay=args.weight_decay)
 
   train_transform, valid_transform = utils._data_transforms_cifar10(args)
-  train_data = dset.CIFAR10(root=args.data, train=True, download=True, transform=train_transform)
+  #train_data = dset.CIFAR10(root=args.data, train=True, download=True, transform=train_transform)
+  train_data = TrainDataset(root = "./new_cifar.pth", transform = train_transform)
 
   num_train = len(train_data)
   indices = list(range(num_train))
