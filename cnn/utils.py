@@ -48,12 +48,16 @@ def indicator(active_list, row, col):
     return indicator
 
 
-def mask_softmax(A, dim):
+def mask_softmax(A, mask, dim):
   A_max = torch.max(A,dim=dim,keepdim=True)[0]
   A_exp = torch.exp(A-A_max)
-  A_exp = A_exp * (~(A == 0)).float() # this step masks
+  #A_final = torch.zeros_like(A_exp)
+  #torch.nonzero(A)
+  #A_exp = torch.where(A == 0, 0 ,A_exp)
+  A_exp = A_exp * mask.float()
+  #A_exp = A_exp * (~(A == 0)).float() # this step masks
   A_softmax = A_exp / torch.sum(A_exp,dim=dim,keepdim=True)
-  return A_softmax
+  return A_softmax*mask+A*(1.0 - mask)
 
 
 

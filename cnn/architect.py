@@ -98,13 +98,9 @@ class Architect(object):
                     #with torch.no_grad():
                     #    self.model.alphas_reduce[i,j] = 0
 
-        logging.info("normal_alphas: ")
-        logging.info(mask_softmax(self.model.alphas_normal, -1))
-        logging.info("reduce_alphas: ")
-        logging.info(mask_softmax(self.model.alphas_reduce, -1))
-        logging.info("normal_alphas: ")
+        logging.info("normal_alphas grad: ")
         logging.info(self.model.alphas_normal.grad)
-        logging.info("reduce_alphas: ")
+        logging.info("reduce_alphas grad: ")
         logging.info(self.model.alphas_reduce.grad)
         logging.info("activated normal_idx: ")
         logging.info(normal_loc)
@@ -119,10 +115,7 @@ class Architect(object):
 
   def _backward_step_unrolled(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer, darts, grow):
     unrolled_model = self._compute_unrolled_model(input_train, target_train, eta, network_optimizer, darts, grow)
-    unrolled_loss = unrolled_model._loss(input_valid, target_valid, grow, p = True)
-    if not darts:
-      print("unroll")
-      print(unrolled_model.arch_parameters())
+    unrolled_loss = unrolled_model._loss(input_valid, target_valid, grow)
     unrolled_loss.backward()
     dalpha = [v.grad for v in unrolled_model.arch_parameters()]
     if darts:
@@ -136,11 +129,6 @@ class Architect(object):
           vector.append(None)
 
     implicit_grads = self._hessian_vector_product(vector, input_train, target_train, darts=darts, grow=grow)
-    if grow:
-        print("d alpha")
-        print(dalpha)
-        print("implicit grad")
-        print(implicit_grads)
     for g, ig in zip(dalpha, implicit_grads):
       g.data.sub_(ig.data, alpha = eta)
 

@@ -29,13 +29,9 @@ class MixedOp(nn.Module):
         op = nn.Sequential(op, nn.BatchNorm2d(C, affine=False))
       self._ops.append(op)
 
-  def forward(self, x, weights, grow = False, p = False):
+  def forward(self, x, weights, grow = False):
     #whether to include 0
     if grow:
-        if p:
-            logging.info("weight forward")
-            logging.info(weights)
-            logging.info([w*op(x) for w, op in zip(weights, self._ops)])
         return sum(w * op(x) for w, op in zip(weights, self._ops))
     return sum(w * op(x) for w, op in zip(weights, self._ops) if not (w==0 or torch.isnan(w)))
 
@@ -62,14 +58,14 @@ class Cell(nn.Module):
         op = MixedOp(C, stride)
         self._ops.append(op)
 
-  def forward(self, s0, s1, weights, grow = False, p = False):
+  def forward(self, s0, s1, weights, grow = False):
     s0 = self.preprocess0(s0)
     s1 = self.preprocess1(s1)
 
     states = [s0, s1]
     offset = 0
     for i in range(self._steps):
-      s = sum(self._ops[offset+j](h, weights[offset+j], grow, p = p) for j, h in enumerate(states))
+      s = sum(self._ops[offset+j](h, weights[offset+j], grow) for j, h in enumerate(states))
       offset += len(states)
       states.append(s)
     output = []
@@ -130,20 +126,20 @@ class Network(nn.Module):
             x.set_(y.data)
     return model_new
 
-  def forward(self, input, grow = False, p = False):
+  def forward(self, input, grow = False):
     s0 = s1 = self.stem(input)
     for i, cell in enumerate(self.cells):
       if cell.reduction:
-        weights = mask_softmax(self.alphas_reduce, dim=-1)
+        weights = mask_softmax(self.alphas_reduce, self.reduce_indicator, dim=-1)
       else:
-        weights = mask_softmax(self.alphas_normal, dim=-1)
-      s0, s1 = s1, cell(s0, s1, weights, grow, p=p)
+        weights = mask_softmax(self.alphas_normal, self.normal_indicator, dim=-1)
+      s0, s1 = s1, cell(s0, s1, weights, grow)
     out = self.global_pooling(s1)
     logits = self.classifier(out.view(out.size(0),-1))
     return logits
 
-  def _loss(self, input, target, grow=False, p = False):
-    logits = self(input, grow, p = p)
+  def _loss(self, input, target, grow=False):
+    logits = self(input, grow)
     return self._criterion(logits, target)
 
   def _initialize_alphas(self, darts):
@@ -159,14 +155,14 @@ class Network(nn.Module):
     else:
       #self.active = all_ops
       self.active = k
-      self.normal_indicator = torch.zeros([k, num_ops])
+      self.normal_indicator = torch.zeros([k, num_ops]).cuda()
       #self.normal_idx = []
       for i in range(k):
           idxs = np.random.choice(num_ops-1, size = 2, replace = False)
           #self.normal_idx.append([i,idx])
           self.normal_indicator[i,idxs[0]]=1
           self.normal_indicator[i,idxs[1]]=1
-      self.reduce_indicator = torch.zeros([k, num_ops])
+      self.reduce_indicator = torch.zeros([k, num_ops]).cuda()
       #self.reduce_idx = []
       for i in range(k):
           idxs = np.random.choice(num_ops-1, size = 2, replace = False)
@@ -175,13 +171,13 @@ class Network(nn.Module):
           self.reduce_indicator[i,idxs[1]]=1
 
 
-      alphas_normal = 1e-3*torch.randn(k, num_ops).cuda()*self.normal_indicator.cuda()
-      alphas_reduce = 1e-3*torch.randn(k, num_ops).cuda()*self.reduce_indicator.cuda()
+      self.alphas_normal = 1e-3*torch.randn(k, num_ops).cuda()*self.normal_indicator.cuda()
+      self.alphas_reduce = 1e-3*torch.randn(k, num_ops).cuda()*self.reduce_indicator.cuda()
 
-      #self.alphas_normal.requires_grad_()
-      #self.alphas_reduce.requires_grad_()
-      self.alphas_normal = Variable(alphas_normal, requires_grad=True)
-      self.alphas_reduce = Variable(alphas_reduce, requires_grad=True)
+      self.alphas_normal.requires_grad_()
+      self.alphas_reduce.requires_grad_()
+      #self.alphas_normal = Variable(alphas_normal, requires_grad=True)
+      #self.alphas_reduce = Variable(alphas_reduce, requires_grad=True)
     self._arch_parameters = [
       self.alphas_normal,
       self.alphas_reduce,
