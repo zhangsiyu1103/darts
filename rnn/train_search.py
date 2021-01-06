@@ -9,13 +9,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 from architect import Architect
-
+import time
 import gc
 
 import data
 import model_search as model
 
 from utils import batchify, get_batch, repackage_hidden, create_exp_dir, save_checkpoint
+
+record={"train":0, "arch":0}
 
 parser = argparse.ArgumentParser(description='PyTorch PennTreeBank/WikiText2 Language Model')
 parser.add_argument('--data', type=str, default='../data/penn/',
@@ -70,7 +72,7 @@ parser.add_argument('--small_batch_size', type=int, default=-1,
                      until batch_size is reached. An update step is then performed.')
 parser.add_argument('--max_seq_len_delta', type=int, default=20,
                     help='max sequence length')
-parser.add_argument('--single_gpu', default=True, action='store_false', 
+parser.add_argument('--single_gpu', default=True, action='store_false',
                     help='use single GPU')
 parser.add_argument('--gpu', type=int, default=0, help='GPU device to use')
 parser.add_argument('--unrolled', action='store_true', default=False, help='use one-step unrolled validation loss')
@@ -123,7 +125,7 @@ ntokens = len(corpus.dictionary)
 if args.continue_train:
     model = torch.load(os.path.join(args.save, 'model.pt'))
 else:
-    model = model.RNNModelSearch(ntokens, args.emsize, args.nhid, args.nhidlast, 
+    model = model.RNNModelSearch(ntokens, args.emsize, args.nhid, args.nhidlast,
                        args.dropout, args.dropouth, args.dropoutx, args.dropouti, args.dropoute)
 
 size = 0
@@ -153,20 +155,22 @@ def evaluate(data_source, batch_size=10):
     total_loss = 0
     ntokens = len(corpus.dictionary)
     hidden = model.init_hidden(batch_size)
-    for i in range(0, data_source.size(0) - 1, args.bptt):
-        data, targets = get_batch(data_source, i, args, evaluation=True)
-        targets = targets.view(-1)
+    with torch.no_grad():
+        for i in range(0, data_source.size(0) - 1, args.bptt):
+            data, targets = get_batch(data_source, i, args)
+            targets = targets.view(-1)
 
-        log_prob, hidden = parallel_model(data, hidden)
-        loss = nn.functional.nll_loss(log_prob.view(-1, log_prob.size(2)), targets).data
+            log_prob, hidden = parallel_model(data, hidden)
+            loss = nn.functional.nll_loss(log_prob.view(-1, log_prob.size(2)), targets).item()
 
-        total_loss += loss * len(data)
+            total_loss += loss * len(data)
 
-        hidden = repackage_hidden(hidden)
-    return total_loss[0] / len(data_source)
+            hidden = repackage_hidden(hidden)
+    return total_loss / (len(data_source) - 1)
 
 
 def train():
+    train_start = time.time()
     assert args.batch_size % args.small_batch_size == 0, 'batch_size must be divisible by small_batch_size'
 
     # Turn on training mode which enables dropout.
@@ -203,11 +207,14 @@ def train():
             hidden[s_id] = repackage_hidden(hidden[s_id])
             hidden_valid[s_id] = repackage_hidden(hidden_valid[s_id])
 
+            arch_s = time.time()
             hidden_valid[s_id], grad_norm = architect.step(
                     hidden[s_id], cur_data, cur_targets,
                     hidden_valid[s_id], cur_data_valid, cur_targets_valid,
                     optimizer,
                     args.unrolled)
+            arch_e = time.time()
+            record["arch"]+=(arch_e-arch_s)
 
             # assuming small_batch_size = batch_size so we don't accumulate gradients
             optimizer.zero_grad()
@@ -233,7 +240,7 @@ def train():
             gc.collect()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs.
-        torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
         optimizer.step()
 
         # total_loss += raw_loss.data
@@ -241,7 +248,7 @@ def train():
         if batch % args.log_interval == 0 and batch > 0:
             logging.info(parallel_model.genotype())
             print(F.softmax(parallel_model.weights, dim=-1))
-            cur_loss = total_loss[0] / args.log_interval
+            cur_loss = total_loss / args.log_interval
             elapsed = time.time() - start_time
             logging.info('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
                     'loss {:5.2f} | ppl {:8.2f}'.format(
@@ -251,6 +258,9 @@ def train():
             start_time = time.time()
         batch += 1
         i += seq_len
+    train_end = time.time()
+    record["train"]+=(train_end-train_start)
+    torch.save(record, "train_t.pt")
 
 # Loop over epochs.
 lr = args.lr

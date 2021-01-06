@@ -35,7 +35,7 @@ class Architect(object):
     grads = torch.autograd.grad(loss, self.model.parameters())
     clip_coef = _clip(grads, self.network_clip)
     dtheta = _concat(grads).data + self.network_weight_decay*theta
-    unrolled_model = self._construct_model_from_theta(theta.sub(eta, dtheta))
+    unrolled_model = self._construct_model_from_theta(theta.sub(dtheta, alpha = eta))
     return unrolled_model, clip_coef
 
   def step(self,
@@ -70,7 +70,7 @@ class Architect(object):
     implicit_grads = self._hessian_vector_product(vector, hidden_train, input_train, target_train, r=1e-2)
 
     for g, ig in zip(dalpha, implicit_grads):
-      g.data.sub_(eta * clip_coef, ig.data)
+      g.data.sub_(ig.data, alpha = eta * clip_coef)
 
     for v, g in zip(self.model.arch_parameters(), dalpha):
       if v.grad is None:
@@ -97,17 +97,17 @@ class Architect(object):
   def _hessian_vector_product(self, vector, hidden, input, target, r=1e-2):
     R = r / _concat(vector).norm()
     for p, v in zip(self.model.parameters(), vector):
-      p.data.add_(R, v)
+      p.data.add_(v, alpha = R)
     loss, _ = self.model._loss(hidden, input, target)
     grads_p = torch.autograd.grad(loss, self.model.arch_parameters())
 
     for p, v in zip(self.model.parameters(), vector):
-      p.data.sub_(2*R, v)
+      p.data.sub_(v, alpha = 2*R)
     loss, _ = self.model._loss(hidden, input, target)
     grads_n = torch.autograd.grad(loss, self.model.arch_parameters())
 
     for p, v in zip(self.model.parameters(), vector):
-      p.data.add_(R, v)
+      p.data.add_(v, alpha = R)
 
     return [(x-y).div_(2*R) for x, y in zip(grads_p, grads_n)]
 

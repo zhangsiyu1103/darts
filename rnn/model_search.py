@@ -5,7 +5,9 @@ from genotypes import PRIMITIVES, STEPS, CONCAT, Genotype
 from torch.autograd import Variable
 from collections import namedtuple
 from model import DARTSCell, RNNModel
+import time
 
+record={"ch":0, "unweight":0, "sum":0}
 
 class DARTSCellSearch(DARTSCell):
 
@@ -17,6 +19,7 @@ class DARTSCellSearch(DARTSCell):
     s0 = self._compute_init_state(x, h_prev, x_mask, h_mask)
     s0 = self.bn(s0)
     probs = F.softmax(self.weights, dim=-1)
+    #print(probs)
 
     offset = 0
     states = s0.unsqueeze(0)
@@ -25,20 +28,43 @@ class DARTSCellSearch(DARTSCell):
         masked_states = states * h_mask.unsqueeze(0)
       else:
         masked_states = states
+      start_ch = time.time()
       ch = masked_states.view(-1, self.nhid).mm(self._Ws[i]).view(i+1, -1, 2*self.nhid)
       c, h = torch.split(ch, self.nhid, dim=-1)
       c = c.sigmoid()
+      end_ch = time.time()
+      record["ch"]+=(end_ch-start_ch)
 
       s = torch.zeros_like(s0)
       for k, name in enumerate(PRIMITIVES):
         if name == 'none':
           continue
         fn = self._get_activation(name)
-        unweighted = states + c * (fn(h) - states)
+        unw_s = time.time()
+        unweighted = torch.zeros_like(states)
+        sum_cur = 0
+        for j,s in enumerate(states):
+            if not probs[offset+j,k]==0:
+                #print(fn(h[j]).shape)
+                #print(states[j].shape)
+                #print(c.shape)
+                #print(unweighted[j].shape)
+                unweighted[j] = states[j] + c[0]*(fn(h[j])-states[j])
+
+        #unweighted = states + c * (fn(h) - states)
+        unw_e = time.time()
+        #print("cur connect ", i)
+        #print(probs[offset:offset+i+1, k])
+        print(unweighted.shape)
         s += torch.sum(probs[offset:offset+i+1, k].unsqueeze(-1).unsqueeze(-1) * unweighted, dim=0)
+        print(s.shape)
+        sum_e = time.time()
+        record["unweight"]+=(unw_e-unw_s)
+        record["sum"]+=(sum_e-unw_e)
       s = self.bn(s)
       states = torch.cat([states, s.unsqueeze(0)], 0)
       offset += i+1
+    torch.save(record,"f_record.pt")
     output = torch.mean(states[-CONCAT:], dim=0)
     return output
 
@@ -56,10 +82,21 @@ class RNNModelSearch(RNNModel):
             x.data.copy_(y.data)
         return model_new
 
-    def _initialize_arch_parameters(self):
+    def _initialize_arch_parameters(self, darts):
       k = sum(i for i in range(1, STEPS+1))
-      weights_data = torch.randn(k, len(PRIMITIVES)).mul_(1e-3)
-      self.weights = Variable(weights_data.cuda(), requires_grad=True)
+      num_ops = len(PRIMITIVES)
+      if darts:
+        self.weights = torch.randn(k, num_ops).mul_(1e-3)
+      else:
+        self.indicator = torch.zeros([k, num_ops]).cuda()
+        for i in range(k):
+          idx = np.random.choice(num_ops-1, size = 1, replace = False)
+          self.indicator[i, idx[0]]=1
+          self.weights = torch.randn(k, num_ops).mul_(1e-3)*self.indicator
+      self.weights.requires_grad_()
+
+
+      #self.weights = Variable(weights_data.cuda(), requires_grad=True)
       self._arch_parameters = [self.weights]
       for rnn in self.rnns:
         rnn.weights = self.weights
@@ -71,6 +108,19 @@ class RNNModelSearch(RNNModel):
       log_prob, hidden_next = self(input, hidden, return_h=False)
       loss = nn.functional.nll_loss(log_prob.view(-1, log_prob.size(2)), target)
       return loss, hidden_next
+
+    def load_my_state_dict(self, state_dict):
+      own_state = self.state_dict()
+      for name, param in state_dict.items():
+        if name not in own_state:
+          continue
+        if isinstance(param, Parameter):
+          param = param.data
+        own_state[name].copy_(param)
+
+
+
+
 
     def genotype(self):
 

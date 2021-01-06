@@ -71,7 +71,7 @@ parser.add_argument('--small_batch_size', type=int, default=-1,
                      until batch_size is reached. An update step is then performed.')
 parser.add_argument('--max_seq_len_delta', type=int, default=20,
                     help='max sequence length')
-parser.add_argument('--single_gpu', default=True, action='store_false', 
+parser.add_argument('--single_gpu', default=True, action='store_false',
                     help='use single GPU')
 parser.add_argument('--gpu', type=int, default=0, help='GPU device to use')
 parser.add_argument('--arch', type=str, default='DARTS', help='which architecture to use')
@@ -119,8 +119,8 @@ if args.continue_train:
     model = torch.load(os.path.join(args.save, 'model.pt'))
 else:
     genotype = eval("genotypes.%s" % args.arch)
-    model = model.RNNModel(ntokens, args.emsize, args.nhid, args.nhidlast, 
-                       args.dropout, args.dropouth, args.dropoutx, args.dropouti, args.dropoute, 
+    model = model.RNNModel(ntokens, args.emsize, args.nhid, args.nhidlast,
+                       args.dropout, args.dropouth, args.dropoutx, args.dropouti, args.dropoute,
                        cell_cls=model.DARTSCell, genotype=genotype)
 
 if args.cuda:
@@ -143,17 +143,18 @@ def evaluate(data_source, batch_size=10):
     total_loss = 0
     ntokens = len(corpus.dictionary)
     hidden = model.init_hidden(batch_size)
-    for i in range(0, data_source.size(0) - 1, args.bptt):
-        data, targets = get_batch(data_source, i, args, evaluation=True)
-        targets = targets.view(-1)
+    with torch.no_grad():
+        for i in range(0, data_source.size(0) - 1, args.bptt):
+            data, targets = get_batch(data_source, i, args)
+            targets = targets.view(-1)
 
-        log_prob, hidden = parallel_model(data, hidden)
-        loss = nn.functional.nll_loss(log_prob.view(-1, log_prob.size(2)), targets).data
+            log_prob, hidden = parallel_model(data, hidden)
+            loss = nn.functional.nll_loss(log_prob.view(-1, log_prob.size(2)), targets).item()
 
-        total_loss += loss * len(data)
+            total_loss += loss * len(data)
 
-        hidden = repackage_hidden(hidden)
-    return total_loss[0] / len(data_source)
+            hidden = repackage_hidden(hidden)
+    return total_loss / len(data_source)
 
 
 def train():
@@ -197,7 +198,7 @@ def train():
             # Temporal Activation Regularization (slowness)
             loss = loss + sum(args.beta * (rnn_h[1:] - rnn_h[:-1]).pow(2).mean() for rnn_h in rnn_hs[-1:])
             loss *= args.small_batch_size / args.batch_size
-            total_loss += raw_loss.data * args.small_batch_size / args.batch_size
+            total_loss += raw_loss.item() * args.small_batch_size / args.batch_size
             loss.backward()
 
             s_id += 1
@@ -207,17 +208,17 @@ def train():
             gc.collect()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs.
-        torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
         optimizer.step()
 
         # total_loss += raw_loss.data
         optimizer.param_groups[0]['lr'] = lr2
 
-        if np.isnan(total_loss[0]):
+        if np.isnan(total_loss):
           raise
 
         if batch % args.log_interval == 0 and batch > 0:
-            cur_loss = total_loss[0] / args.log_interval
+            cur_loss = total_loss / args.log_interval
             elapsed = time.time() - start_time
             logging.info('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
                     'loss {:5.2f} | ppl {:8.2f}'.format(
@@ -227,7 +228,9 @@ def train():
             start_time = time.time()
         batch += 1
         i += seq_len
-
+for k, v in model.named_parameters():
+    print(k)
+    print(v)
 # Loop over epochs.
 lr = args.lr
 best_val_loss = []
@@ -254,7 +257,7 @@ try:
           logging.info('rolling back to the previous best model ...')
           model = torch.load(os.path.join(args.save, 'model.pt'))
           parallel_model = model.cuda()
-          
+
           optimizer_state = torch.load(os.path.join(args.save, 'optimizer.pt'))
           if 't0' in optimizer_state['param_groups'][0]:
             optimizer = torch.optim.ASGD(model.parameters(), lr=args.lr, t0=0, lambd=0., weight_decay=args.wdecay)

@@ -1,13 +1,14 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import os, shutil
 import numpy as np
 from torch.autograd import Variable
 
 
 def repackage_hidden(h):
-    if type(h) == Variable:
-        return Variable(h.data)
+    if isinstance(h, torch.Tensor):
+        return h.detach()
     else:
         return tuple(repackage_hidden(v) for v in h)
 
@@ -22,11 +23,14 @@ def batchify(data, bsz, args):
     return data
 
 
-def get_batch(source, i, args, seq_len=None, evaluation=False):
+def get_batch(source, i, args, seq_len=None):
     seq_len = min(seq_len if seq_len else args.bptt, len(source) - 1 - i)
-    data = Variable(source[i:i+seq_len], volatile=evaluation)
-    target = Variable(source[i+1:i+1+seq_len])
+    #data = Variable(source[i:i+seq_len], volatile=evaluation)
+    data = source[i:i+seq_len]
+    target = source[i+1:i+1+seq_len]
     return data, target
+    #target = Variable(source[i+1:i+1+seq_len])
+    #return data, target
 
 
 def create_exp_dir(path, scripts_to_save=None):
@@ -64,7 +68,11 @@ def embedded_dropout(embed, words, dropout=0.1, scale=None):
     padding_idx = embed.padding_idx
     if padding_idx is None:
         padding_idx = -1
-    X = embed._backend.Embedding.apply(words, masked_embed_weight,
+    #X = embed._backend.Embedding.apply(words, masked_embed_weight,
+    #    padding_idx, embed.max_norm, embed.norm_type,
+    #    embed.scale_grad_by_freq, embed.sparse
+    #)
+    X = F.embedding(words, masked_embed_weight,
         padding_idx, embed.max_norm, embed.norm_type,
         embed.scale_grad_by_freq, embed.sparse
     )
