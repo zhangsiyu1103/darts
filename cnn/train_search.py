@@ -42,6 +42,7 @@ parser.add_argument('--unrolled', action='store_true', default=False, help='use 
 parser.add_argument('--arch_learning_rate', type=float, default=3e-4, help='learning rate for arch encoding')
 parser.add_argument('--arch_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
 parser.add_argument('--darts', action='store_true', default=False, help='use original darts code')
+parser.add_argument('--sample', action='store_true', default=False, help='whether use sampled dataset')
 args = parser.parse_args()
 
 args.save = 'search-{}-{}'.format(args.save, time.strftime("%Y%m%d-%H%M%S"))
@@ -86,8 +87,10 @@ def main():
       weight_decay=args.weight_decay)
 
   train_transform, valid_transform = utils._data_transforms_cifar10(args)
-  #train_data = dset.CIFAR10(root=args.data, train=True, download=True, transform=train_transform)
-  train_data = TrainDataset(root = "./new_cifar.pth", transform = train_transform)
+  if args.sample:
+    train_data = TrainDataset(root = "./new_cifar.pth", transform = train_transform, sample = True)
+  else:
+    train_data = dset.CIFAR10(root=args.data, train=True, download=True, transform=train_transform)
 
   num_train = len(train_data)
   indices = list(range(num_train))
