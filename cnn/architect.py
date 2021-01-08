@@ -64,49 +64,59 @@ class Architect(object):
         self._backward_step_unrolled(input_train, target_train, input_valid, target_valid, eta, network_optimizer, darts, grow)
     else:
         self._backward_step(input_valid, target_valid, grow)
-    if not grow:
-        self.optimizer.step()
-    else:
+    #if not grow:
+    self.optimizer.step()
+    if grow:
         # grow normal
-        n_row = self.model.normal_indicator.size(0)
-        n_col = self.model.normal_indicator.size(1)
-        max_grad = 0
-        normal_loc = None
-        for i in range(n_row):
-            for j in range(n_col):
-                if self.model.normal_indicator[i,j]==0:
-                    cur_grad = self.model.alphas_normal.grad[i,j]
-                    if abs(cur_grad) > max_grad:
-                        max_grad = cur_grad
-                        normal_loc = (i,j)
-                    # change val back
-                    #with torch.no_grad():
-                    #    self.model.alphas_normal[i,j] = 0
+        if not hasattr(self,"normal_grad"):
+            self.normal_grad = self.model.alphas_normal.grad
+        else:
+            self.normal_grad+=self.model.alphas_normal.grad
+        if not hasattr(self,"reduce_grad"):
+            self.reduce_grad = self.model.alphas_reduce.grad
+        else:
+            self.reduce_grad+=self.model.alphas_reduce.grad
+
+  def grow(self):
+    n_row = self.model.normal_indicator.size(0)
+    n_col = self.model.normal_indicator.size(1)
+    max_grad = 0
+    normal_loc = None
+    for i in range(n_row):
+        for j in range(n_col):
+            if self.model.normal_indicator[i,j]==0:
+                cur_grad = self.normal_grad[i,j]
+                if abs(cur_grad) > max_grad:
+                    max_grad = cur_grad
+                    normal_loc = (i,j)
+                # change val back
+                #with torch.no_grad():
+                #    self.model.alphas_normal[i,j] = 0
 
 
-        n_row = self.model.reduce_indicator.size(0)
-        n_col = self.model.reduce_indicator.size(1)
-        max_grad = 0
-        reduce_loc = None
-        for i in range(n_row):
-            for j in range(n_col):
-                if self.model.reduce_indicator[i,j]==0:
-                    cur_grad = self.model.alphas_reduce.grad[i,j]
-                    if abs(cur_grad) > max_grad:
-                        max_grad = cur_grad
-                        reduce_loc = (i,j)
-                    #with torch.no_grad():
-                    #    self.model.alphas_reduce[i,j] = 0
+    n_row = self.model.reduce_indicator.size(0)
+    n_col = self.model.reduce_indicator.size(1)
+    max_grad = 0
+    reduce_loc = None
+    for i in range(n_row):
+        for j in range(n_col):
+            if self.model.reduce_indicator[i,j]==0:
+                cur_grad = self.reduce_grad[i,j]
+                if abs(cur_grad) > max_grad:
+                    max_grad = cur_grad
+                    reduce_loc = (i,j)
+                #with torch.no_grad():
+                #    self.model.alphas_reduce[i,j] = 0
 
-        logging.info("normal_alphas grad: ")
-        logging.info(self.model.alphas_normal.grad)
-        logging.info("reduce_alphas grad: ")
-        logging.info(self.model.alphas_reduce.grad)
-        logging.info("activated normal_idx: ")
-        logging.info(normal_loc)
-        logging.info("activated reduce_idx: ")
-        logging.info(reduce_loc)
-        self.model.activate(normal_loc, reduce_loc)
+    logging.info("normal_alphas grad: ")
+    logging.info(self.model.alphas_normal.grad)
+    logging.info("reduce_alphas grad: ")
+    logging.info(self.model.alphas_reduce.grad)
+    logging.info("activated normal_idx: ")
+    logging.info(normal_loc)
+    logging.info("activated reduce_idx: ")
+    logging.info(reduce_loc)
+    self.model.activate(normal_loc, reduce_loc)
 
 
   def _backward_step(self, input_valid, target_valid, grow):

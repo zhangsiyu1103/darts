@@ -20,7 +20,7 @@ from architect import Architect
 
 parser = argparse.ArgumentParser("cifar")
 parser.add_argument('--data', type=str, default='../data', help='location of the data corpus')
-parser.add_argument('--batch_size', type=int, default=64, help='batch size')
+parser.add_argument('--batch_size', type=int, default=96, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.025, help='init learning rate')
 parser.add_argument('--learning_rate_min', type=float, default=0.001, help='min learning rate')
 parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
@@ -101,6 +101,7 @@ def main():
       sampler=torch.utils.data.sampler.SubsetRandomSampler(indices[:split]),
       pin_memory=True, num_workers=2)
 
+
   valid_queue = torch.utils.data.DataLoader(
       train_data, batch_size=args.batch_size,
       sampler=torch.utils.data.sampler.SubsetRandomSampler(indices[split:num_train]),
@@ -127,9 +128,6 @@ def main():
       print(F.softmax(model.alphas_normal, dim=-1))
       print(F.softmax(model.alphas_reduce, dim=-1))
 
-    # grow
-    if not args.darts:
-      grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
 
    # print("post grow")
    # alphas_reduce = torch.where(model.alphas_reduce==0,torch.FloatTensor([float("-inf")]).cuda(),model.alphas_reduce)
@@ -139,7 +137,11 @@ def main():
 
 
     # training
-    train_acc, train_obj = train(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
+    if args.darts:
+      train_acc, train_obj = train(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
+    else:
+      #train with growing
+      train_acc, train_obj = train(train_queue, valid_queue, model, architect, criterion, optimizer, lr, grow = True)
     logging.info('train_acc %f', train_acc)
 
     #scheduler update
@@ -155,25 +157,39 @@ def main():
 
     utils.save(model, os.path.join(args.save, 'weights.pt'))
 
-def grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
+#def grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
+#
+#  inputs = []
+#  targets = []
+#  input_searches = []
+#  target_searches = []
+#  model.train()
+#  for step, (input, target) in enumerate(train_queue):
+#    inputs.append(input)
+#    targets.append(target)
+#
+#
+#    #input = Variable(input, requires_grad=False).cuda()
+#    #target = Variable(target, requires_grad=False).cuda(non_blocking=True)
+#
+#    # get a random minibatch from the search queue with replacement
+#    input_search, target_search = next(iter(valid_queue))
+#    input_searches.append(input_search)
+#    target_searches.append(target_search)
+#    #input_search = Variable(input_search, requires_grad=False).cuda()
+#    #target_search = Variable(target_search, requires_grad=False).cuda(non_blocking=True)
+#    architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled, grow = True)
+#  architect.grow()
 
-  for step, (input, target) in enumerate(train_queue):
-    print("grow")
-    model.train()
+  #input.requires_grad_()
+  #target.requires_grad_()
+  #input_search.requires_grad_()
+  #target_search.requires_grad_()
 
-    input = Variable(input, requires_grad=False).cuda()
-    target = Variable(target, requires_grad=False).cuda(non_blocking=True)
 
-    # get a random minibatch from the search queue with replacement
-    input_search, target_search = next(iter(valid_queue))
-    input_search = Variable(input_search, requires_grad=False).cuda()
-    target_search = Variable(target_search, requires_grad=False).cuda(non_blocking=True)
-    architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled, grow = True)
-    break
+  #print("grow done")
 
-  print("grow done")
-
-def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
+def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr, grow = True):
   objs = utils.AvgrageMeter()
   top1 = utils.AvgrageMeter()
   top5 = utils.AvgrageMeter()
@@ -190,7 +206,7 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
     input_search = Variable(input_search, requires_grad=False).cuda()
     target_search = Variable(target_search, requires_grad=False).cuda(non_blocking=True)
     arch_start = time.time()
-    architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled, darts = args.darts)
+    architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled, darts = args.darts, grow = grow)
     #train_time
     train_start = time.time()
     optimizer.zero_grad()
@@ -213,7 +229,8 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
     torch.save(t_record, "train_time.pth")
     if step % args.report_freq == 0:
       logging.info('train %03d %e %f %f', step, objs.avg, top1.avg, top5.avg)
-
+  if grow:
+    architect.grow()
   return top1.avg, objs.avg
 
 
