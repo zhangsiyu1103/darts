@@ -65,7 +65,6 @@ class Architect(object):
     else:
         self._backward_step(input_valid, target_valid, grow)
     #if not grow:
-    self.optimizer.step()
     if grow:
         # grow normal
         if not hasattr(self,"normal_grad"):
@@ -76,8 +75,12 @@ class Architect(object):
             self.reduce_grad = self.model.alphas_reduce.grad
         else:
             self.reduce_grad+=self.model.alphas_reduce.grad
+        self.model.alphas_normal.grad *= self.model.normal_indicator
+        self.model.alphas_reduce.grad *= self.model.reduce_indicator
+    self.optimizer.step()
 
   def grow(self):
+    print("start grow")
     n_row = self.model.normal_indicator.size(0)
     n_col = self.model.normal_indicator.size(1)
     max_grad = 0
@@ -117,6 +120,9 @@ class Architect(object):
     logging.info("activated reduce_idx: ")
     logging.info(reduce_loc)
     self.model.activate(normal_loc, reduce_loc)
+    logging.info(self.model.alphas_normal)
+    logging.info(self.model.alphas_reduce)
+    print("grow done")
 
 
   def _backward_step(self, input_valid, target_valid, grow):
