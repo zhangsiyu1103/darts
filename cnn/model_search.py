@@ -136,13 +136,19 @@ class Network(nn.Module):
         #print("reduce")
         #print(self.alphas_reduce)
         #print(self.reduce_indicator)
-        weights = mask_softmax(self.alphas_reduce, self.reduce_indicator, dim=-1)
+        if grow:
+          weights = mask_softmax(self.alphas_reduce, self.reduce_indicator, dim=-1)
+        else:
+          weights = F.softmax(self.alphas_reduce, dim=-1)
         #print("weights")
         #print(weights)
       else:
         #print("normal")
         #print(self.alphas_normal)
-        weights = mask_softmax(self.alphas_normal, self.normal_indicator, dim=-1)
+        if grow:
+          weights = mask_softmax(self.alphas_normal, self.normal_indicator, dim=-1)
+        else:
+          weights = F.softmax(self.alphas_normal, dim=-1)
         #print("weights")
         #print(weights)
       s0, s1 = s1, cell(s0, s1, weights, grow)
