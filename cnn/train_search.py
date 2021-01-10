@@ -137,11 +137,7 @@ def main():
 
 
     # training
-    if args.darts:
-      train_acc, train_obj = train(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
-    else:
-      #train with growing
-      train_acc, train_obj = train(train_queue, valid_queue, model, architect, criterion, optimizer, lr, grow = True)
+    train_acc, train_obj = train(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
     logging.info('train_acc %f', train_acc)
 
     #scheduler update
@@ -152,44 +148,30 @@ def main():
     valid_acc, valid_obj = infer(valid_queue, model, criterion)
     logging.info('valid_acc %f', valid_acc)
 
+    if not args.darts:
+        grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
 
 
 
     utils.save(model, os.path.join(args.save, 'weights.pt'))
 
-#def grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
-#
-#  inputs = []
-#  targets = []
-#  input_searches = []
-#  target_searches = []
-#  model.train()
-#  for step, (input, target) in enumerate(train_queue):
-#    inputs.append(input)
-#    targets.append(target)
-#
-#
-#    #input = Variable(input, requires_grad=False).cuda()
-#    #target = Variable(target, requires_grad=False).cuda(non_blocking=True)
-#
-#    # get a random minibatch from the search queue with replacement
-#    input_search, target_search = next(iter(valid_queue))
-#    input_searches.append(input_search)
-#    target_searches.append(target_search)
-#    #input_search = Variable(input_search, requires_grad=False).cuda()
-#    #target_search = Variable(target_search, requires_grad=False).cuda(non_blocking=True)
-#    architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled, grow = True)
-#  architect.grow()
+def grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
+  print("grow start")
+  model.train()
+  for step, (input, target) in enumerate(train_queue):
+    input = input.cuda()
+    target = target.cuda()
 
-  #input.requires_grad_()
-  #target.requires_grad_()
-  #input_search.requires_grad_()
-  #target_search.requires_grad_()
+    # get a random minibatch from the search queue with replacement
+    input_search, target_search = next(iter(valid_queue))
+    input_search = input_search.cuda()
+    target_search = target_search.cuda()
+    architect.grow_step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled)
+  architect.grow()
 
+  print("grow done")
 
-  #print("grow done")
-
-def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr, grow = True):
+def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
   objs = utils.AvgrageMeter()
   top1 = utils.AvgrageMeter()
   top5 = utils.AvgrageMeter()
@@ -206,7 +188,7 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr, 
     input_search = Variable(input_search, requires_grad=False).cuda()
     target_search = Variable(target_search, requires_grad=False).cuda(non_blocking=True)
     arch_start = time.time()
-    architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled, darts = args.darts, grow = grow)
+    architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled, darts = args.darts)
     #train_time
     train_start = time.time()
     optimizer.zero_grad()
@@ -230,8 +212,6 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr, 
     if step % args.report_freq == 0:
       logging.info('train %03d %e %f %f', step, objs.avg, top1.avg, top5.avg)
 
-  if grow:
-    architect.grow()
   return top1.avg, objs.avg
 
 

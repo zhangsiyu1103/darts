@@ -120,19 +120,31 @@ class Network(nn.Module):
     self._initialize_alphas(darts)
 
   def new(self):
-    model_new = Network(self._C, self._num_classes, self._layers, self._criterion).cuda()
-    for x, y in zip(model_new.arch_parameters(), self.arch_parameters()):
-        with torch.no_grad():
-            x.set_(y.data)
+    #model_new = Network(self._C, self._num_classes, self._layers, self._criterion).cuda()
+    #for x, y in zip(model_new.arch_parameters(), self.arch_parameters()):
+    #    with torch.no_grad():
+    #        x.set_(y.data)
+    #model_new.normal_indicaor = self.normal_indicator
+    #model_new.reduce_indicaor = self.reduce_indicator
+    model_new = copy.deepcopy(self)
     return model_new
 
   def forward(self, input, grow = False):
     s0 = s1 = self.stem(input)
     for i, cell in enumerate(self.cells):
       if cell.reduction:
+        #print("reduce")
+        #print(self.alphas_reduce)
+        #print(self.reduce_indicator)
         weights = mask_softmax(self.alphas_reduce, self.reduce_indicator, dim=-1)
+        #print("weights")
+        #print(weights)
       else:
+        #print("normal")
+        #print(self.alphas_normal)
         weights = mask_softmax(self.alphas_normal, self.normal_indicator, dim=-1)
+        #print("weights")
+        #print(weights)
       s0, s1 = s1, cell(s0, s1, weights, grow)
     out = self.global_pooling(s1)
     logits = self.classifier(out.view(out.size(0),-1))

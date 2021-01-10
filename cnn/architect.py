@@ -26,7 +26,6 @@ class Architect(object):
     loss = self.model._loss(input, target, grow)
     if darts:
       grads_all = torch.autograd.grad(loss, self.model.parameters(), allow_unused=True)
-      theta = _concat(self.model.parameters()).data
       idx_use = None
     else:
       grads_all = torch.autograd.grad(loss, self.model.parameters(), allow_unused=True)
@@ -40,47 +39,41 @@ class Architect(object):
     unrolled_model = self._construct_model_from_theta(theta.sub(moment+dtheta, alpha = eta),idx_use)
     return unrolled_model
 
-  def step(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer, unrolled, darts = False, grow = False):
+  def step(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer, unrolled, darts = False):
     self.optimizer.zero_grad()
-
-    # set to small val for evaluare
-    #if grow:
-    #  with torch.no_grad():
-    #    n_row = self.model.normal_indicator.size(0)
-    #    n_col = self.model.normal_indicator.size(1)
-    #    for i in range(n_row):
-    #        for j in range(n_col):
-    #            if self.model.normal_indicator[i,j]==0:
-    #                self.model.alphas_normal[i,j] = np.log(0.01)
-
-    #    n_row = self.model.reduce_indicator.size(0)
-    #    n_col = self.model.reduce_indicator.size(1)
-    #    for i in range(n_row):
-    #        for j in range(n_col):
-    #            if self.model.reduce_indicator[i,j]==0:
-    #                self.model.alphas_reduce[i,j] = np.log(0.01)
-
     if unrolled:
-        self._backward_step_unrolled(input_train, target_train, input_valid, target_valid, eta, network_optimizer, darts, grow)
+        self._backward_step_unrolled(input_train, target_train, input_valid, target_valid, eta, network_optimizer, darts)
     else:
-        self._backward_step(input_valid, target_valid, grow)
-    #if not grow:
-    if grow:
-        # grow normal
-        if not hasattr(self,"normal_grad"):
-            self.normal_grad = self.model.alphas_normal.grad
-        else:
-            self.normal_grad+=self.model.alphas_normal.grad
-        if not hasattr(self,"reduce_grad"):
-            self.reduce_grad = self.model.alphas_reduce.grad
-        else:
-            self.reduce_grad+=self.model.alphas_reduce.grad
-        self.model.alphas_normal.grad *= self.model.normal_indicator
-        self.model.alphas_reduce.grad *= self.model.reduce_indicator
+        self._backward_step(input_valid, target_valid)
+    #logging.info("normal_alphas grad: ")
+    #logging.info(self.model.alphas_reduce.grad)
+    #logging.info("reduce_alphas grad: ")
+    #logging.info(self.model.alphas_reduce.grad)
+
+    # eliminate unwanted grad noise
+    self.model.alphas_normal.grad *= self.model.normal_indicator
+    self.model.alphas_reduce.grad *= self.model.reduce_indicator
+    #print([v.grad for v in self.optimizer.param_groups[0]["params"]])
     self.optimizer.step()
 
+  def grow_step(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer, unrolled, darts = False):
+    self.optimizer.zero_grad()
+    if unrolled:
+        self._backward_step_unrolled(input_train, target_train, input_valid, target_valid, eta, network_optimizer, darts, grow=True)
+    else:
+        self._backward_step(input_valid, target_valid, grow = True)
+    #if not grow:
+    # grow normal
+    if not hasattr(self,"normal_grad") or self.normal_grad is None:
+        self.normal_grad = self.model.alphas_normal.grad.clone()
+    else:
+        self.normal_grad+=self.model.alphas_normal.grad
+    if not hasattr(self,"reduce_grad") or self.reduce_grad is None:
+        self.reduce_grad = self.model.alphas_reduce.grad.clone()
+    else:
+        self.reduce_grad+=self.model.alphas_reduce.grad
+
   def grow(self):
-    print("start grow")
     n_row = self.model.normal_indicator.size(0)
     n_col = self.model.normal_indicator.size(1)
     max_grad = 0
@@ -92,9 +85,6 @@ class Architect(object):
                 if abs(cur_grad) > max_grad:
                     max_grad = cur_grad
                     normal_loc = (i,j)
-                # change val back
-                #with torch.no_grad():
-                #    self.model.alphas_normal[i,j] = 0
 
 
     n_row = self.model.reduce_indicator.size(0)
@@ -108,28 +98,27 @@ class Architect(object):
                 if abs(cur_grad) > max_grad:
                     max_grad = cur_grad
                     reduce_loc = (i,j)
-                #with torch.no_grad():
-                #    self.model.alphas_reduce[i,j] = 0
 
     logging.info("normal_alphas grad: ")
-    logging.info(self.model.alphas_normal.grad)
+    logging.info(self.normal_grad)
     logging.info("reduce_alphas grad: ")
-    logging.info(self.model.alphas_reduce.grad)
+    logging.info(self.reduce_grad)
     logging.info("activated normal_idx: ")
     logging.info(normal_loc)
     logging.info("activated reduce_idx: ")
     logging.info(reduce_loc)
     self.model.activate(normal_loc, reduce_loc)
-    logging.info(self.model.alphas_normal)
-    logging.info(self.model.alphas_reduce)
-    print("grow done")
+    #logging.info(self.model.alphas_normal)
+    #logging.info(self.model.alphas_reduce)
+    self.normal_grad = None
+    self.reduce_grad = None
 
 
-  def _backward_step(self, input_valid, target_valid, grow):
+  def _backward_step(self, input_valid, target_valid, grow = False):
     loss = self.model._loss(input_valid, target_valid, grow)
     loss.backward()
 
-  def _backward_step_unrolled(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer, darts, grow):
+  def _backward_step_unrolled(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer, darts, grow=False):
     unrolled_model = self._compute_unrolled_model(input_train, target_train, eta, network_optimizer, darts, grow)
     unrolled_loss = unrolled_model._loss(input_valid, target_valid, grow)
     unrolled_loss.backward()
