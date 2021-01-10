@@ -27,6 +27,7 @@ class Architect(object):
     if darts:
       grads_all = torch.autograd.grad(loss, self.model.parameters(), allow_unused=True)
       idx_use = None
+      theta = _concat(self.model.parameters()).data
     else:
       grads_all = torch.autograd.grad(loss, self.model.parameters(), allow_unused=True)
       idx_use = tuple(i for i in range(len(grads_all)) if grads_all[i] is not None )
