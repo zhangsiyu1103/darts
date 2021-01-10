@@ -55,9 +55,13 @@ fh = logging.FileHandler(os.path.join(args.save, 'log.txt'))
 fh.setFormatter(logging.Formatter(log_format))
 logging.getLogger().addHandler(fh)
 
-t_record={"arch":0,"train":0}
+t_record={"train":0, "grow":0, "grow_search":0}
 
 CIFAR_CLASSES = 10
+
+train_time = 0
+grow_time = 0
+
 
 def main():
 
@@ -137,8 +141,11 @@ def main():
 
 
     # training
+    train_s = time.time()
     train_acc, train_obj = train(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
     logging.info('train_acc %f', train_acc)
+    train_e = time.time()
+    t_record["train"]+=(train_e-train_s)
 
     #scheduler update
     scheduler.step()
@@ -149,16 +156,25 @@ def main():
     logging.info('valid_acc %f', valid_acc)
 
     if not args.darts:
+        grow_s = time.time()
         grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
+        grow_e = time.time()
+        t_record["grow"]+=(grow_e-grow_s)
 
-
+    torch.save(t_record, "time_record.pt")
 
     utils.save(model, os.path.join(args.save, 'weights.pt'))
+  logging.info("total train: %f", t_record["train"])
+  logging.info("total grow: %f", t_record["grow"])
+  logging.info("total grow search: %f", t_record["grow_search"])
 
 def grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
   print("grow start")
   model.train()
+  grow_time = 0
+  counter = 0
   for step, (input, target) in enumerate(train_queue):
+    start = time.time()
     input = input.cuda()
     target = target.cuda()
 
@@ -167,7 +183,15 @@ def grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
     input_search = input_search.cuda()
     target_search = target_search.cuda()
     architect.grow_step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled)
+    end = time.time()
+    grow_time += (end-start)
+    counter += 1
+  logging.info("grow time per batch: %f ", grow_time/counter)
+  search_s = time.time()
   architect.grow()
+  search_e = time.time()
+  t_record["grow_search"] += (search_e-search_s)
+  logging.info("grow search grad : %f", search_e-search_s)
 
   print("grow done")
 
@@ -176,7 +200,10 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
   top1 = utils.AvgrageMeter()
   top5 = utils.AvgrageMeter()
 
+  train_time = 0
+  counter = 0
   for step, (input, target) in enumerate(train_queue):
+    start = time.time()
     model.train()
     n = input.size(0)
 
@@ -187,10 +214,8 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
     input_search, target_search = next(iter(valid_queue))
     input_search = Variable(input_search, requires_grad=False).cuda()
     target_search = Variable(target_search, requires_grad=False).cuda(non_blocking=True)
-    arch_start = time.time()
     architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled, darts = args.darts)
     #train_time
-    train_start = time.time()
     optimizer.zero_grad()
     logits = model(input)
     loss = criterion(logits, target)
@@ -203,14 +228,18 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
     objs.update(loss.item(), n)
     top1.update(prec1.item(), n)
     top5.update(prec5.item(), n)
-    end = time.time()
-    t_record["arch"]+=(train_start-arch_start)
-    t_record["train"]+=(end-train_start)
+    #t_record["arch"]+=(train_start-arch_start)
+    #t_record["train"]+=(end-train_start)
     #model.random_activate()
 
-    torch.save(t_record, "train_time.pth")
+    #torch.save(t_record, "train_time.pth")
     if step % args.report_freq == 0:
       logging.info('train %03d %e %f %f', step, objs.avg, top1.avg, top5.avg)
+    end = time.time()
+    train_time += (end-start)
+    counter += 1
+
+  logging.info('train time per batch : %f', train_time/counter)
 
   return top1.avg, objs.avg
 
