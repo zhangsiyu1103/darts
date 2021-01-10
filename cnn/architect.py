@@ -52,8 +52,9 @@ class Architect(object):
     #logging.info(self.model.alphas_reduce.grad)
 
     # eliminate unwanted grad noise
-    self.model.alphas_normal.grad *= self.model.normal_indicator
-    self.model.alphas_reduce.grad *= self.model.reduce_indicator
+    if not darts:
+      self.model.alphas_normal.grad *= self.model.normal_indicator
+      self.model.alphas_reduce.grad *= self.model.reduce_indicator
     #print([v.grad for v in self.optimizer.param_groups[0]["params"]])
     self.optimizer.step()
 
