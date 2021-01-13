@@ -93,6 +93,7 @@ class Network(nn.Module):
     self._criterion = criterion
     self._steps = steps
     self._multiplier = multiplier
+    self.darts = darts
 
     C_curr = stem_multiplier*C
     self.stem = nn.Sequential(
@@ -117,7 +118,7 @@ class Network(nn.Module):
     self.global_pooling = nn.AdaptiveAvgPool2d(1)
     self.classifier = nn.Linear(C_prev, num_classes)
 
-    self._initialize_alphas(darts)
+    self._initialize_alphas()
 
   def new(self):
     #model_new = Network(self._C, self._num_classes, self._layers, self._criterion).cuda()
@@ -136,19 +137,19 @@ class Network(nn.Module):
         #print("reduce")
         #print(self.alphas_reduce)
         #print(self.reduce_indicator)
-        if grow:
-          weights = mask_softmax(self.alphas_reduce, self.reduce_indicator, dim=-1)
-        else:
+        if self.darts:
           weights = F.softmax(self.alphas_reduce, dim=-1)
+        else:
+          weights = mask_softmax(self.alphas_reduce, self.reduce_indicator, dim=-1)
         #print("weights")
         #print(weights)
       else:
         #print("normal")
         #print(self.alphas_normal)
-        if grow:
-          weights = mask_softmax(self.alphas_normal, self.normal_indicator, dim=-1)
-        else:
+        if self.darts:
           weights = F.softmax(self.alphas_normal, dim=-1)
+        else:
+          weights = mask_softmax(self.alphas_normal, self.normal_indicator, dim=-1)
         #print("weights")
         #print(weights)
       s0, s1 = s1, cell(s0, s1, weights, grow)
@@ -160,14 +161,14 @@ class Network(nn.Module):
     logits = self(input, grow)
     return self._criterion(logits, target)
 
-  def _initialize_alphas(self, darts):
+  def _initialize_alphas(self):
   # initialize two connection per row for weight update to be useful
     #num of connection
     k = sum(1 for i in range(self._steps) for n in range(2+i))
     #num of operation per connection
     num_ops = len(PRIMITIVES)
     all_ops = k * num_ops
-    if darts:
+    if self.darts:
       self.alphas_normal = Variable(1e-3*torch.randn(k, num_ops).cuda(), requires_grad=True)
       self.alphas_reduce = Variable(1e-3*torch.randn(k, num_ops).cuda(), requires_grad=True)
     else:
