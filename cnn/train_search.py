@@ -20,7 +20,7 @@ from architect import Architect
 
 parser = argparse.ArgumentParser("cifar")
 parser.add_argument('--data', type=str, default='../data', help='location of the data corpus')
-parser.add_argument('--batch_size', type=int, default=96, help='batch size')
+parser.add_argument('--batch_size', type=int, default=64, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.025, help='init learning rate')
 parser.add_argument('--learning_rate_min', type=float, default=0.001, help='min learning rate')
 parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
@@ -38,8 +38,9 @@ parser.add_argument('--save', type=str, default='EXP', help='experiment name')
 parser.add_argument('--seed', type=int, default=2, help='random seed')
 parser.add_argument('--grad_clip', type=float, default=5, help='gradient clipping')
 parser.add_argument('--train_portion', type=float, default=0.5, help='portion of training data')
+parser.add_argument('--grow_portion', type=float, default=1.0, help='portion of training data for grow')
 parser.add_argument('--unrolled', action='store_true', default=False, help='use one-step unrolled validation loss')
-parser.add_argument('--arch_learning_rate', type=float, default=3e-4, help='learning rate for arch encoding')
+parser.add_argument('--arch_learning_rate', type=float, default=1e-2, help='learning rate for arch encoding')
 parser.add_argument('--arch_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
 parser.add_argument('--darts', action='store_true', default=False, help='use original darts code')
 parser.add_argument('--sample', action='store_true', default=False, help='whether use sampled dataset')
@@ -99,17 +100,24 @@ def main():
   num_train = len(train_data)
   indices = list(range(num_train))
   split = int(np.floor(args.train_portion * num_train))
+  train_grow = int(np.floor(args.grow_portion * split))
+  valid_grow = int(np.floor(args.grow_portion * (num_train - split)))
+
+  train_indices = indices[:split]
+  valid_indices = indices[split:]
 
   train_queue = torch.utils.data.DataLoader(
       train_data, batch_size=args.batch_size,
-      sampler=torch.utils.data.sampler.SubsetRandomSampler(indices[:split]),
+      sampler=torch.utils.data.sampler.SubsetRandomSampler(train_indices),
       pin_memory=True, num_workers=2)
-
 
   valid_queue = torch.utils.data.DataLoader(
       train_data, batch_size=args.batch_size,
-      sampler=torch.utils.data.sampler.SubsetRandomSampler(indices[split:num_train]),
+      sampler=torch.utils.data.sampler.SubsetRandomSampler(valid_indices),
       pin_memory=True, num_workers=2)
+
+
+
 
   scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, float(args.epochs), eta_min=args.learning_rate_min)
@@ -126,11 +134,11 @@ def main():
     if not args.darts:
       alphas_reduce = torch.where(model.alphas_reduce==0,torch.FloatTensor([float("-inf")]).cuda(),model.alphas_reduce)
       alphas_normal = torch.where(model.alphas_normal==0,torch.FloatTensor([float("-inf")]).cuda(),model.alphas_normal)
-      print(F.softmax(alphas_normal, dim=-1))
-      print(F.softmax(alphas_reduce, dim=-1))
+      logging.info(F.softmax(alphas_normal, dim=-1))
+      logging.info(F.softmax(alphas_reduce, dim=-1))
     else:
-      print(F.softmax(model.alphas_normal, dim=-1))
-      print(F.softmax(model.alphas_reduce, dim=-1))
+      logging.info(F.softmax(model.alphas_normal, dim=-1))
+      logging.info(F.softmax(model.alphas_reduce, dim=-1))
 
 
    # print("post grow")
@@ -156,10 +164,23 @@ def main():
     logging.info('valid_acc %f', valid_acc)
 
     if not args.darts:
-        grow_s = time.time()
-        grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
-        grow_e = time.time()
-        t_record["grow"]+=(grow_e-grow_s)
+      train_indices_grow = np.random.choice(train_indices, train_grow, replace = False)
+      valid_indices_grow = np.random.choice(valid_indices, valid_grow, replace = False)
+
+      train_grow_queue = torch.utils.data.DataLoader(
+          train_data, batch_size=args.batch_size,
+          sampler=torch.utils.data.sampler.SubsetRandomSampler(train_indices_grow),
+          pin_memory=True, num_workers=2)
+
+      valid_grow_queue = torch.utils.data.DataLoader(
+          train_data, batch_size=args.batch_size,
+          sampler=torch.utils.data.sampler.SubsetRandomSampler(valid_indices_grow),
+          pin_memory=True, num_workers=2)
+
+      grow_s = time.time()
+      grow(train_grow_queue, valid_grow_queue, model, architect, criterion, optimizer, lr)
+      grow_e = time.time()
+      t_record["grow"]+=(grow_e-grow_s)
 
     torch.save(t_record, "time_record.pt")
 
@@ -167,6 +188,9 @@ def main():
   logging.info("total train: %f", t_record["train"])
   logging.info("total grow: %f", t_record["grow"])
   logging.info("total grow search: %f", t_record["grow_search"])
+
+
+
 
 def grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
   print("grow start")
@@ -207,13 +231,13 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
     model.train()
     n = input.size(0)
 
-    input = Variable(input, requires_grad=False).cuda()
-    target = Variable(target, requires_grad=False).cuda(non_blocking=True)
+    input = input.cuda()
+    target = target.cuda()
 
     # get a random minibatch from the search queue with replacement
     input_search, target_search = next(iter(valid_queue))
-    input_search = Variable(input_search, requires_grad=False).cuda()
-    target_search = Variable(target_search, requires_grad=False).cuda(non_blocking=True)
+    input_search = input_search.cuda()
+    target_search = target_search.cuda()
     architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled, darts = args.darts)
     #train_time
     optimizer.zero_grad()

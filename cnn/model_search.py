@@ -220,19 +220,19 @@ class Network(nn.Module):
         return
     with torch.no_grad():
         self.normal_indicator[r_normal_idx,c_normal_idx] = 1
-        self.alphas_normal[r_normal_idx,c_normal_idx] = math.log(0.1)
+        self.alphas_normal[r_normal_idx,c_normal_idx] = math.log(0.001)
         self.reduce_indicator[r_reduce_idx,c_reduce_idx] = 1
-        self.alphas_reduce[r_reduce_idx,c_reduce_idx] = math.log(0.1)
+        self.alphas_reduce[r_reduce_idx,c_reduce_idx] = math.log(0.001)
     self.active+=1
 
   def activate(self, normal_idx, reduce_idx):
     with torch.no_grad():
         if normal_idx is not None:
             self.normal_indicator[normal_idx] = 1
-            self.alphas_normal[normal_idx] = math.log(0.1)
+            self.alphas_normal[normal_idx] = math.log(0.001)
         if reduce_idx is not None:
             self.reduce_indicator[reduce_idx] = 1
-            self.alphas_reduce[reduce_idx] = math.log(0.1)
+            self.alphas_reduce[reduce_idx] = math.log(0.001)
     self.active+=1
 
 
