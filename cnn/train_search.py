@@ -167,7 +167,7 @@ def main():
     valid_acc, valid_obj = infer(valid_queue, model, criterion)
     logging.info('valid_acc %f', valid_acc)
 
-    if not args.darts and epoch % args.grow_freq == 0 and not epoch == args.epochs-1 or not epoch == 0:
+    if not args.darts and epoch % args.grow_freq == 0 and not epoch == args.epochs-1 and not epoch == 0:
       train_indices_grow = np.random.choice(train_indices, train_grow, replace = False)
       valid_indices_grow = np.random.choice(valid_indices, valid_grow, replace = False)
 

@@ -264,7 +264,7 @@ class Network(nn.Module):
       real_weight = mask_softmax(self.alphas_normal, self.normal_indicator, dim = -1)
       for i in range(n_row):
         for j in range(n_col):
-          if real_weight[i,j] <= 0.01:
+          if real_weight[i,j] <= 0.001:
             self.normal_indicator[i,j] = 0
             self.alphas_normal[i,j] = 0
       n_row = self.reduce_indicator.size(0)
@@ -272,7 +272,7 @@ class Network(nn.Module):
       real_weight = mask_softmax(self.alphas_reduce, self.reduce_indicator, dim = -1)
       for i in range(n_row):
         for j in range(n_col):
-          if real_weight[i,j] <= 0.01:
+          if real_weight[i,j] <= 0.001:
             self.reduce_indicator[i,j] = 0
             self.alphas_reduce[i,j] = 0
 

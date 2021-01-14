@@ -21,7 +21,7 @@ class Architect(object):
     self.model = model
     self.optimizer = torch.optim.Adam(self.model.arch_parameters(),
         lr=args.arch_learning_rate, betas=(0.5, 0.999), weight_decay=args.arch_weight_decay)
-    self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size = 1, gamma=0.2)
+    self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size = 1, gamma=0.7)
   def _compute_unrolled_model(self, input, target, eta, network_optimizer, darts, grow = False):
     loss = self.model._loss(input, target, grow)
     if darts:
