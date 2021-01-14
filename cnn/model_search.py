@@ -23,17 +23,36 @@ class MixedOp(nn.Module):
   def __init__(self, C, stride):
     super(MixedOp, self).__init__()
     self._ops = nn.ModuleList()
+    self.C = C
+    self.stride = stride
     for primitive in PRIMITIVES:
-      op = OPS[primitive](C, stride, False)
-      if 'pool' in primitive:
-        op = nn.Sequential(op, nn.BatchNorm2d(C, affine=False))
-      self._ops.append(op)
+      #op = OPS[primitive](C, stride, False)
+      #if 'pool' in primitive:
+      #  op = nn.Sequential(op, nn.BatchNorm2d(C, affine=False))
+      #self._ops.append(op)
+      self._ops.append(None)
 
   def forward(self, x, weights, grow = False):
     #whether to include 0
-    if grow:
-        return sum(w * op(x) for w, op in zip(weights, self._ops))
-    return sum(w * op(x) for w, op in zip(weights, self._ops) if not (w==0 or torch.isnan(w)))
+    #if grow:
+    #    return sum(w * op(x) for w, op in zip(weights, self._ops))
+    ret = 0
+    for i in range(len(weights)):
+      if weights[i] == 0 and not grow:
+          if self._ops[i] is not None:
+            self._ops[i]=None
+          continue
+      if self._ops[i] == None:
+        primitive = PRIMITIVES[i]
+        op = OPS[primitive](self.C, self.stride, False)
+        if 'pool' in primitive:
+          op = nn.Sequential(op, nn.BatchNorm2d(self.C, affine=False))
+        #print(x.device== torch.device("cuda:0"))
+        op = op.to(x.device)
+        self._ops[i] = op
+      ret += weights[i]*self._ops[i](x)
+    return ret
+    #return sum(w * op(x) for w, op in zip(weights, self._ops) if not (w==0 or torch.isnan(w)))
 
 
 class Cell(nn.Module):
@@ -228,15 +247,34 @@ class Network(nn.Module):
 
   def activate(self, normal_idx, reduce_idx):
     with torch.no_grad():
-        if normal_idx is not None:
-            self.normal_indicator[normal_idx] = 1
-            self.alphas_normal[normal_idx] = math.log(0.001)
-        if reduce_idx is not None:
-            self.reduce_indicator[reduce_idx] = 1
-            self.alphas_reduce[reduce_idx] = math.log(0.001)
-    self.active+=1
+      if normal_idx is not None:
+        for idx in normal_idx:
+          self.normal_indicator[idx] = 1
+          self.alphas_normal[idx] = math.log(0.001)
+      if reduce_idx is not None:
+        for idx in reduce_idx:
+          self.reduce_indicator[idx] = 1
+          self.alphas_reduce[idx] = math.log(0.001)
 
 
+  def deactivate(self):
+    with torch.no_grad():
+      n_row = self.normal_indicator.size(0)
+      n_col = self.normal_indicator.size(1)
+      real_weight = mask_softmax(self.alphas_normal, self.normal_indicator, dim = -1)
+      for i in range(n_row):
+        for j in range(n_col):
+          if real_weight[i,j] <= 0.01:
+            self.normal_indicator[i,j] = 0
+            self.alphas_normal[i,j] = 0
+      n_row = self.reduce_indicator.size(0)
+      n_col = self.reduce_indicator.size(1)
+      real_weight = mask_softmax(self.alphas_reduce, self.reduce_indicator, dim = -1)
+      for i in range(n_row):
+        for j in range(n_col):
+          if real_weight[i,j] <= 0.01:
+            self.reduce_indicator[i,j] = 0
+            self.alphas_reduce[i,j] = 0
 
 
   def load_my_state_dict(self, state_dict):

@@ -21,7 +21,7 @@ class Architect(object):
     self.model = model
     self.optimizer = torch.optim.Adam(self.model.arch_parameters(),
         lr=args.arch_learning_rate, betas=(0.5, 0.999), weight_decay=args.arch_weight_decay)
-
+    self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size = 1, gamma=0.2)
   def _compute_unrolled_model(self, input, target, eta, network_optimizer, darts, grow = False):
     loss = self.model._loss(input, target, grow)
     if darts:
@@ -75,31 +75,40 @@ class Architect(object):
     else:
         self.reduce_grad+=self.model.alphas_reduce.grad
 
-  def grow(self):
+  def grow(self, num_grow):
     n_row = self.model.normal_indicator.size(0)
     n_col = self.model.normal_indicator.size(1)
-    max_grad = 0
+    max_grad = [0 for i in range(num_grow)]
     normal_loc = None
+    normal_list = []
     for i in range(n_row):
         for j in range(n_col):
             if self.model.normal_indicator[i,j]==0:
-                cur_grad = self.normal_grad[i,j]
-                if abs(cur_grad) > max_grad:
-                    max_grad = cur_grad
-                    normal_loc = (i,j)
+                cur_grad = abs(self.normal_grad[i,j])
+                normal_list.append((cur_grad, (i,j)))
+                #if cur_grad > max_grad[0]:
 
+                #if cur_grad > max_grad:
+                    #max_grad = cur_grad
+                    #normal_loc = (i,j)
+    normal_list.sort(key = lambda x:x[0], reverse = True)
+    normal_loc = [normal_list[i][1] for i in range(num_grow)]
 
     n_row = self.model.reduce_indicator.size(0)
     n_col = self.model.reduce_indicator.size(1)
     max_grad = 0
     reduce_loc = None
+    reduce_list = []
     for i in range(n_row):
         for j in range(n_col):
             if self.model.reduce_indicator[i,j]==0:
-                cur_grad = self.reduce_grad[i,j]
-                if abs(cur_grad) > max_grad:
-                    max_grad = cur_grad
-                    reduce_loc = (i,j)
+                cur_grad = abs(self.reduce_grad[i,j])
+                reduce_list.append((cur_grad, (i,j)))
+                #if abs(cur_grad) > max_grad:
+                #    max_grad = cur_grad
+                #    reduce_loc = (i,j)
+    reduce_list.sort(key = lambda x:x[0], reverse = True)
+    reduce_loc = [reduce_list[i][1] for i in range(num_grow)]
 
     logging.info("normal_alphas grad: ")
     logging.info(self.normal_grad)
@@ -114,6 +123,7 @@ class Architect(object):
     #logging.info(self.model.alphas_reduce)
     self.normal_grad = None
     self.reduce_grad = None
+    self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size = 1, gamma=0.5)
 
 
   def _backward_step(self, input_valid, target_valid, grow = False):

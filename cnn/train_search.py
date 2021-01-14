@@ -20,7 +20,8 @@ from architect import Architect
 
 parser = argparse.ArgumentParser("cifar")
 parser.add_argument('--data', type=str, default='../data', help='location of the data corpus')
-parser.add_argument('--batch_size', type=int, default=64, help='batch size')
+parser.add_argument('--batch_size', type=int, default=96, help='batch size')
+parser.add_argument('--grow_batch_size', type=int, default=64, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.025, help='init learning rate')
 parser.add_argument('--learning_rate_min', type=float, default=0.001, help='min learning rate')
 parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
@@ -39,8 +40,10 @@ parser.add_argument('--seed', type=int, default=2, help='random seed')
 parser.add_argument('--grad_clip', type=float, default=5, help='gradient clipping')
 parser.add_argument('--train_portion', type=float, default=0.5, help='portion of training data')
 parser.add_argument('--grow_portion', type=float, default=1.0, help='portion of training data for grow')
+parser.add_argument('--grow_freq', type=int, default=5, help='frequency of growing')
+parser.add_argument('--num_grow', type=int, default=4, help='number of edges activated each time grows')
 parser.add_argument('--unrolled', action='store_true', default=False, help='use one-step unrolled validation loss')
-parser.add_argument('--arch_learning_rate', type=float, default=1e-2, help='learning rate for arch encoding')
+parser.add_argument('--arch_learning_rate', type=float, default=2e-2, help='learning rate for arch encoding')
 parser.add_argument('--arch_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
 parser.add_argument('--darts', action='store_true', default=False, help='use original darts code')
 parser.add_argument('--sample', action='store_true', default=False, help='whether use sampled dataset')
@@ -157,28 +160,29 @@ def main():
 
     #scheduler update
     scheduler.step()
+    architect.scheduler.step()
 
 
     # validation
     valid_acc, valid_obj = infer(valid_queue, model, criterion)
     logging.info('valid_acc %f', valid_acc)
 
-    if not args.darts:
+    if not args.darts and epoch % args.grow_freq == 0 and not epoch == args.epochs-1 or not epoch == 0:
       train_indices_grow = np.random.choice(train_indices, train_grow, replace = False)
       valid_indices_grow = np.random.choice(valid_indices, valid_grow, replace = False)
 
       train_grow_queue = torch.utils.data.DataLoader(
-          train_data, batch_size=args.batch_size,
+          train_data, batch_size=args.grow_batch_size,
           sampler=torch.utils.data.sampler.SubsetRandomSampler(train_indices_grow),
           pin_memory=True, num_workers=2)
 
       valid_grow_queue = torch.utils.data.DataLoader(
-          train_data, batch_size=args.batch_size,
+          train_data, batch_size=args.grow_batch_size,
           sampler=torch.utils.data.sampler.SubsetRandomSampler(valid_indices_grow),
           pin_memory=True, num_workers=2)
 
       grow_s = time.time()
-      grow(train_grow_queue, valid_grow_queue, model, architect, criterion, optimizer, lr)
+      grow(train_grow_queue, valid_grow_queue, model, architect, criterion, optimizer, lr, args.num_grow)
       grow_e = time.time()
       t_record["grow"]+=(grow_e-grow_s)
 
@@ -192,9 +196,10 @@ def main():
 
 
 
-def grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
+def grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr, num_grow):
   print("grow start")
   model.train()
+  model.deactivate()
   grow_time = 0
   counter = 0
   for step, (input, target) in enumerate(train_queue):
@@ -212,7 +217,7 @@ def grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
     counter += 1
   logging.info("grow time per batch: %f ", grow_time/counter)
   search_s = time.time()
-  architect.grow()
+  architect.grow(num_grow)
   search_e = time.time()
   t_record["grow_search"] += (search_e-search_s)
   logging.info("grow search grad : %f", search_e-search_s)
