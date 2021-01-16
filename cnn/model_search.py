@@ -26,34 +26,36 @@ class MixedOp(nn.Module):
     self.C = C
     self.stride = stride
     for primitive in PRIMITIVES:
-      #op = OPS[primitive](C, stride, False)
-      #if 'pool' in primitive:
-      #  op = nn.Sequential(op, nn.BatchNorm2d(C, affine=False))
-      #self._ops.append(op)
-      self._ops.append(None)
+      op = OPS[primitive](C, stride, False)
+      if 'pool' in primitive:
+        op = nn.Sequential(op, nn.BatchNorm2d(C, affine=False))
+      self._ops.append(op)
+      #self._ops.append(None)
 
   def forward(self, x, weights, grow = False):
     #whether to include 0
     #if grow:
     #    return sum(w * op(x) for w, op in zip(weights, self._ops))
+    #return sum(w * op(x) for w, op in zip(weights, self._ops) if not (w==0 or torch.isnan(w)))
     ret = 0
     for i in range(len(weights)):
       if weights[i] == 0 and not grow:
-          if self._ops[i] is not None:
-            self._ops[i]=None
-          continue
-      if self._ops[i] == None:
-        primitive = PRIMITIVES[i]
-        op = OPS[primitive](self.C, self.stride, False)
-        if 'pool' in primitive:
-          op = nn.Sequential(op, nn.BatchNorm2d(self.C, affine=False))
-        #print(x.device== torch.device("cuda:0"))
-        op = op.to(x.device)
-        self._ops[i] = op
+        #if self._ops[i] is not None:
+        self._ops[i] = self._ops[i].cpu()
+        continue
+      #if self._ops[i] == None:
+      #  primitive = PRIMITIVES[i]
+      #  op = OPS[primitive](self.C, self.stride, False)
+      #  if 'pool' in primitive:
+      #    op = nn.Sequential(op, nn.BatchNorm2d(self.C, affine=False))
+      #  #print(x.device== torch.device("cuda:0"))
+      #  #op = op.to(x.device)
+      #  self._ops[i] = op
+      self._ops[i] = self._ops[i].to(x.device)
       ret += weights[i]*self._ops[i](x)
+    for i in range(len(weights)):
+      self._ops[i] = self._ops[i].to(x.device)
     return ret
-    #return sum(w * op(x) for w, op in zip(weights, self._ops) if not (w==0 or torch.isnan(w)))
-
 
 class Cell(nn.Module):
 
@@ -275,6 +277,7 @@ class Network(nn.Module):
           if real_weight[i,j] <= 0.001:
             self.reduce_indicator[i,j] = 0
             self.alphas_reduce[i,j] = 0
+
 
 
   def load_my_state_dict(self, state_dict):

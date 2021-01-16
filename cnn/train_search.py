@@ -20,8 +20,8 @@ from architect import Architect
 
 parser = argparse.ArgumentParser("cifar")
 parser.add_argument('--data', type=str, default='../data', help='location of the data corpus')
-parser.add_argument('--batch_size', type=int, default=96, help='batch size')
-parser.add_argument('--grow_batch_size', type=int, default=64, help='batch size')
+parser.add_argument('--batch_size', type=int, default=50, help='batch size')
+parser.add_argument('--grow_batch_size', type=int, default=45, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.025, help='init learning rate')
 parser.add_argument('--learning_rate_min', type=float, default=0.001, help='min learning rate')
 parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
@@ -42,8 +42,9 @@ parser.add_argument('--train_portion', type=float, default=0.5, help='portion of
 parser.add_argument('--grow_portion', type=float, default=1.0, help='portion of training data for grow')
 parser.add_argument('--grow_freq', type=int, default=5, help='frequency of growing')
 parser.add_argument('--num_grow', type=int, default=4, help='number of edges activated each time grows')
+
 parser.add_argument('--unrolled', action='store_true', default=False, help='use one-step unrolled validation loss')
-parser.add_argument('--arch_learning_rate', type=float, default=2e-2, help='learning rate for arch encoding')
+parser.add_argument('--arch_learning_rate', type=float, default=1e-2, help='learning rate for arch encoding')
 parser.add_argument('--arch_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
 parser.add_argument('--darts', action='store_true', default=False, help='use original darts code')
 parser.add_argument('--sample', action='store_true', default=False, help='whether use sampled dataset')
@@ -73,12 +74,12 @@ def main():
     logging.info('no gpu device available')
     sys.exit(1)
 
-  np.random.seed(args.seed)
+  #np.random.seed(args.seed)
   torch.cuda.set_device(args.gpu)
   cudnn.benchmark = True
-  torch.manual_seed(args.seed)
+  #orch.manual_seed(args.seed)
   cudnn.enabled=True
-  torch.cuda.manual_seed(args.seed)
+  #torch.cuda.manual_seed(args.seed)
   logging.info('gpu device = %d' % args.gpu)
   logging.info("args = %s", args)
 
@@ -160,14 +161,16 @@ def main():
 
     #scheduler update
     scheduler.step()
-    architect.scheduler.step()
+    #if architect.scheduler is not None:
+    #  architect.scheduler.step()
+
 
 
     # validation
     valid_acc, valid_obj = infer(valid_queue, model, criterion)
     logging.info('valid_acc %f', valid_acc)
 
-    if not args.darts and epoch % args.grow_freq == 0 and not epoch == args.epochs-1 and not epoch == 0:
+    if not args.darts and epoch % args.grow_freq == 0 and epoch < args.epochs-10:
       train_indices_grow = np.random.choice(train_indices, train_grow, replace = False)
       valid_indices_grow = np.random.choice(valid_indices, valid_grow, replace = False)
 
@@ -199,7 +202,6 @@ def main():
 def grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr, num_grow):
   print("grow start")
   model.train()
-  model.deactivate()
   grow_time = 0
   counter = 0
   for step, (input, target) in enumerate(train_queue):
@@ -212,6 +214,7 @@ def grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr, n
     input_search = input_search.cuda()
     target_search = target_search.cuda()
     architect.grow_step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled)
+    optimizer.zero_grad()
     end = time.time()
     grow_time += (end-start)
     counter += 1
@@ -251,6 +254,14 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
 
     loss.backward()
     nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+    #for g in optimizer.param_groups:
+    #    for p in g["params"]:
+    #        if p.grad is None:
+    #            print("here")
+    #            continue
+    #        #else:
+    #        #    print(p.grad)
+    #        #print(p.grad.device)
     optimizer.step()
 
     prec1, prec5 = utils.accuracy(logits, target, topk=(1, 5))

@@ -21,13 +21,22 @@ class Architect(object):
     self.model = model
     self.optimizer = torch.optim.Adam(self.model.arch_parameters(),
         lr=args.arch_learning_rate, betas=(0.5, 0.999), weight_decay=args.arch_weight_decay)
-    self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size = 1, gamma=0.7)
+    self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size = 10, gamma=0.2)
+
   def _compute_unrolled_model(self, input, target, eta, network_optimizer, darts, grow = False):
+    #if grow:
+    #  new_model = self.model.new()
+    #  loss = new_model._loss(input, target, grow)
+    #else:
     loss = self.model._loss(input, target, grow)
     if darts:
       grads_all = torch.autograd.grad(loss, self.model.parameters(), allow_unused=True)
       idx_use = None
       theta = _concat(self.model.parameters()).data
+    #elif grow:
+    #  grads_all = torch.autograd.grad(loss, new_model.parameters(), allow_unused=True)
+    #  idx_use = None
+    #  theta = _concat(new_model.parameters()).data
     else:
       grads_all = torch.autograd.grad(loss, self.model.parameters(), allow_unused=True)
       idx_use = tuple(i for i in range(len(grads_all)) if grads_all[i] is not None )
@@ -82,31 +91,24 @@ class Architect(object):
     normal_loc = None
     normal_list = []
     for i in range(n_row):
-        for j in range(n_col):
-            if self.model.normal_indicator[i,j]==0:
-                cur_grad = abs(self.normal_grad[i,j])
-                normal_list.append((cur_grad, (i,j)))
-                #if cur_grad > max_grad[0]:
-
-                #if cur_grad > max_grad:
-                    #max_grad = cur_grad
-                    #normal_loc = (i,j)
+      for j in range(n_col):
+        if self.model.normal_indicator[i,j]==0: 
+          cur_grad = self.normal_grad[i,j]
+          normal_list.append((cur_grad, (i,j)))
     normal_list.sort(key = lambda x:x[0], reverse = True)
     normal_loc = [normal_list[i][1] for i in range(num_grow)]
 
+
     n_row = self.model.reduce_indicator.size(0)
     n_col = self.model.reduce_indicator.size(1)
-    max_grad = 0
+    max_grad = [0 for i in range(num_grow)]
     reduce_loc = None
     reduce_list = []
     for i in range(n_row):
-        for j in range(n_col):
-            if self.model.reduce_indicator[i,j]==0:
-                cur_grad = abs(self.reduce_grad[i,j])
-                reduce_list.append((cur_grad, (i,j)))
-                #if abs(cur_grad) > max_grad:
-                #    max_grad = cur_grad
-                #    reduce_loc = (i,j)
+      for j in range(n_col):
+        if self.model.reduce_indicator[i,j]==0: 
+          cur_grad = self.reduce_grad[i,j]
+          reduce_list.append((cur_grad, (i,j)))
     reduce_list.sort(key = lambda x:x[0], reverse = True)
     reduce_loc = [reduce_list[i][1] for i in range(num_grow)]
 
@@ -123,15 +125,23 @@ class Architect(object):
     #logging.info(self.model.alphas_reduce)
     self.normal_grad = None
     self.reduce_grad = None
-    self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size = 1, gamma=0.5)
-
+    #for param_group in self.optimizer.param_groups:
+    #  param_group["lr"] = self.lr
+    #self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size = 3, gamma=0.2)
 
   def _backward_step(self, input_valid, target_valid, grow = False):
-    loss = self.model._loss(input_valid, target_valid, grow)
-    loss.backward()
+    if grow:
+      model_new = self.model.new()
+      loss = model_new._loss(input_valid, target_valid, grow)
+      loss.backward()
+      self.model.alphas_normal.grad = model_new.alphas_normal.grad.clone()
+      self.model.alphas_reduce.grad = model_new.alphas_reduce.grad.clone()
+    else:
+      loss = self.model._loss(input_valid, target_valid, grow)
+      loss.backward()
 
   def _backward_step_unrolled(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer, darts, grow=False):
-    unrolled_model = self._compute_unrolled_model(input_train, target_train, eta, network_optimizer, darts, grow)
+    unrolled_model = self._compute_unrolled_model(input_train, target_train, eta, network_optimizer, darts, grow=grow)
     unrolled_loss = unrolled_model._loss(input_valid, target_valid, grow)
     unrolled_loss.backward()
     dalpha = [v.grad for v in unrolled_model.arch_parameters()]
