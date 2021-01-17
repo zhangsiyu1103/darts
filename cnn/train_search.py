@@ -20,8 +20,8 @@ from architect import Architect
 
 parser = argparse.ArgumentParser("cifar")
 parser.add_argument('--data', type=str, default='../data', help='location of the data corpus')
-parser.add_argument('--batch_size', type=int, default=50, help='batch size')
-parser.add_argument('--grow_batch_size', type=int, default=45, help='batch size')
+parser.add_argument('--batch_size', type=int, default=96, help='batch size')
+parser.add_argument('--grow_batch_size', type=int, default=96, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.025, help='init learning rate')
 parser.add_argument('--learning_rate_min', type=float, default=0.001, help='min learning rate')
 parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
@@ -74,12 +74,12 @@ def main():
     logging.info('no gpu device available')
     sys.exit(1)
 
-  #np.random.seed(args.seed)
+  np.random.seed(args.seed)
   torch.cuda.set_device(args.gpu)
   cudnn.benchmark = True
-  #orch.manual_seed(args.seed)
+  torch.manual_seed(args.seed)
   cudnn.enabled=True
-  #torch.cuda.manual_seed(args.seed)
+  torch.cuda.manual_seed(args.seed)
   logging.info('gpu device = %d' % args.gpu)
   logging.info("args = %s", args)
 
@@ -121,10 +121,10 @@ def main():
       pin_memory=True, num_workers=2)
 
 
-
-
   scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, float(args.epochs), eta_min=args.learning_rate_min)
+        optimizer, float(args.grow_freq), eta_min=args.learning_rate_min)
+
+
 
   architect = Architect(model, args)
 
@@ -161,14 +161,25 @@ def main():
 
     #scheduler update
     scheduler.step()
-    #if architect.scheduler is not None:
-    #  architect.scheduler.step()
+    if architect.scheduler is not None:
+      architect.scheduler.step()
 
 
 
     # validation
     valid_acc, valid_obj = infer(valid_queue, model, criterion)
     logging.info('valid_acc %f', valid_acc)
+
+    if epoch == args.epochs-10:
+      for param_group in optimizer.param_groups:
+        param_group["lr"] = args.learning_rate
+      scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+          optimizer, 10, eta_min=args.learning_rate_min)
+
+      for param_group in architect.optimizer.param_groups:
+        param_group["lr"] = architect.lr
+      architect.scheduler = torch.optim.lr_scheduler.StepLR(architect.optimizer, step_size = 1, gamma=0.9)
+
 
     if not args.darts and epoch % args.grow_freq == 0 and epoch < args.epochs-10:
       train_indices_grow = np.random.choice(train_indices, train_grow, replace = False)
@@ -188,6 +199,10 @@ def main():
       grow(train_grow_queue, valid_grow_queue, model, architect, criterion, optimizer, lr, args.num_grow)
       grow_e = time.time()
       t_record["grow"]+=(grow_e-grow_s)
+      for param_group in optimizer.param_groups:
+        param_group["lr"] = args.learning_rate
+      scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+          optimizer, args.grow_freq, eta_min=args.learning_rate_min)
 
     torch.save(t_record, "time_record.pt")
 
