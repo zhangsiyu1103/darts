@@ -22,7 +22,7 @@ class Architect(object):
     self.lr = args.arch_learning_rate
     self.optimizer = torch.optim.Adam(self.model.arch_parameters(),
         lr=self.lr, betas=(0.5, 0.999), weight_decay=args.arch_weight_decay)
-    self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size = 1, gamma=0.8)
+    #self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size = 1, gamma=0.8)
 
   def _compute_unrolled_model(self, input, target, eta, network_optimizer, darts, grow = False):
     #if grow:
@@ -126,9 +126,9 @@ class Architect(object):
     #logging.info(self.model.alphas_reduce)
     self.normal_grad = None
     self.reduce_grad = None
-    for param_group in self.optimizer.param_groups:
-      param_group["lr"] = self.lr
-    self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size = 1, gamma=0.8)
+    #for param_group in self.optimizer.param_groups:
+    #  param_group["lr"] = self.lr
+    #self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size = 1, gamma=0.8)
 
   def _backward_step(self, input_valid, target_valid, grow = False):
     if grow:

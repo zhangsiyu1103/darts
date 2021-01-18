@@ -161,8 +161,8 @@ def main():
 
     #scheduler update
     scheduler.step()
-    if architect.scheduler is not None:
-      architect.scheduler.step()
+    #if architect.scheduler is not None:
+    #  architect.scheduler.step()
 
 
 
@@ -170,18 +170,9 @@ def main():
     valid_acc, valid_obj = infer(valid_queue, model, criterion)
     logging.info('valid_acc %f', valid_acc)
 
-    if epoch == args.epochs-10:
-      for param_group in optimizer.param_groups:
-        param_group["lr"] = args.learning_rate
-      scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-          optimizer, 10, eta_min=args.learning_rate_min)
-
-      for param_group in architect.optimizer.param_groups:
-        param_group["lr"] = architect.lr
-      architect.scheduler = torch.optim.lr_scheduler.StepLR(architect.optimizer, step_size = 1, gamma=0.9)
 
 
-    if not args.darts and epoch % args.grow_freq == 0 and epoch < args.epochs-10:
+    if not args.darts and epoch % args.grow_freq == 0 and epoch <= args.epochs-15:
       train_indices_grow = np.random.choice(train_indices, train_grow, replace = False)
       valid_indices_grow = np.random.choice(valid_indices, valid_grow, replace = False)
 
@@ -200,9 +191,26 @@ def main():
       grow_e = time.time()
       t_record["grow"]+=(grow_e-grow_s)
       for param_group in optimizer.param_groups:
-        param_group["lr"] = args.learning_rate
+        param_group["lr"] = 0.001
       scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
           optimizer, args.grow_freq, eta_min=args.learning_rate_min)
+
+    if epoch == args.epochs-15:
+      for param_group in optimizer.param_groups:
+        param_group["lr"] = 0.01
+      #scheduler = None
+      #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+      #    optimizer, 10.0, eta_min=args.learning_rate_min)
+      scheduler = torch.optim.lr_scheduler.StepLR(optimizer,
+      2, gamma=0.8)
+
+
+      #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+      #    optimizer, 10.0, eta_min=args.learning_rate_min)
+
+      #for param_group in architect.optimizer.param_groups:
+      #  param_group["lr"] = architect.lr
+      #architect.scheduler = torch.optim.lr_scheduler.StepLR(architect.optimizer, step_size = 1, gamma=0.9)
 
     torch.save(t_record, "time_record.pt")
 
