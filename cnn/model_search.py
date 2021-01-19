@@ -198,14 +198,14 @@ class Network(nn.Module):
       self.normal_indicator = torch.zeros([k, num_ops]).cuda()
       #self.normal_idx = []
       for i in range(k):
-          idxs = np.random.choice(num_ops-1, size = 2, replace = False)
+          idxs = np.random.choice(num_ops, size = 2, replace = False)
           #self.normal_idx.append([i,idx])
           self.normal_indicator[i,idxs[0]]=1
           self.normal_indicator[i,idxs[1]]=1
       self.reduce_indicator = torch.zeros([k, num_ops]).cuda()
       #self.reduce_idx = []
       for i in range(k):
-          idxs = np.random.choice(num_ops-1, size = 2, replace = False)
+          idxs = np.random.choice(num_ops, size = 2, replace = False)
           #self.normal_idx.append([i,idx])
           self.reduce_indicator[i,idxs[0]]=1
           self.reduce_indicator[i,idxs[1]]=1
@@ -302,13 +302,14 @@ class Network(nn.Module):
       for i in range(self._steps):
         end = start + n
         W = weights[start:end].copy()
-        edges = sorted(range(i + 2), key=lambda x: -max(W[x][k] for k in range(len(W[x])) if k != PRIMITIVES.index('none')))[:2]
+        #edges = sorted(range(i + 2), key=lambda x: -max(W[x][k] for k in range(len(W[x])) if k != PRIMITIVES.index('none')))[:2]
+        edges = sorted(range(i + 2), key=lambda x: -max(W[x][k] for k in range(len(W[x])) ))[:2]
         for j in edges:
           k_best = None
           for k in range(len(W[j])):
-            if k != PRIMITIVES.index('none'):
-              if k_best is None or W[j][k] > W[j][k_best]:
-                k_best = k
+            #if k != PRIMITIVES.index('none'):
+            if k_best is None or W[j][k] > W[j][k_best]:
+              k_best = k
           gene.append((PRIMITIVES[k_best], j))
         start = end
         n += 1

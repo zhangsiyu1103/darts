@@ -122,7 +122,7 @@ def main():
 
 
   scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, float(args.grow_freq), eta_min=args.learning_rate_min)
+        optimizer, float(args.epochs), eta_min=args.learning_rate_min)
 
 
 
@@ -158,6 +158,7 @@ def main():
     logging.info('train_acc %f', train_acc)
     train_e = time.time()
     t_record["train"]+=(train_e-train_s)
+    architect.print_arch_grad()
 
     #scheduler update
     scheduler.step()
@@ -172,7 +173,7 @@ def main():
 
 
 
-    if not args.darts and epoch % args.grow_freq == 0 and epoch <= args.epochs-15:
+    if not args.darts and epoch % args.grow_freq == 0 and epoch <= args.epochs-10 and not epoch == 0:
       train_indices_grow = np.random.choice(train_indices, train_grow, replace = False)
       valid_indices_grow = np.random.choice(valid_indices, valid_grow, replace = False)
 
@@ -190,19 +191,24 @@ def main():
       grow(train_grow_queue, valid_grow_queue, model, architect, criterion, optimizer, lr, args.num_grow)
       grow_e = time.time()
       t_record["grow"]+=(grow_e-grow_s)
-      for param_group in optimizer.param_groups:
-        param_group["lr"] = 0.001
-      scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+      if epoch > 0:
+        for param_group in optimizer.param_groups:
+          param_group["lr"] = 0.05
+          param_group["initial_lr"] = 0.05
+        optimizer.defaults["lr"]=0.05
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
           optimizer, args.grow_freq, eta_min=args.learning_rate_min)
 
-    if epoch == args.epochs-15:
+    if epoch == args.epochs-10:
       for param_group in optimizer.param_groups:
         param_group["lr"] = 0.01
+        param_group["initial_lr"] = 0.01
+      optimizer.defaults["lr"]=0.01
       #scheduler = None
       #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
       #    optimizer, 10.0, eta_min=args.learning_rate_min)
-      scheduler = torch.optim.lr_scheduler.StepLR(optimizer,
-      2, gamma=0.8)
+      scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                 optimizer, 15, eta_min=args.learning_rate_min)
 
 
       #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
