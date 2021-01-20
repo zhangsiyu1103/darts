@@ -31,7 +31,7 @@ class Architect(object):
     #else:
     loss = self.model._loss(input, target, grow)
     if darts:
-      grads_all = torch.autograd.grad(loss, self.model.parameters(), allow_unused=True)
+      grads_all = torch.autograd.grad(loss, self.model.parameters())
       idx_use = None
       theta = _concat(self.model.parameters()).data
     #elif grow:
@@ -73,6 +73,7 @@ class Architect(object):
         self.reduce_grad = self.model.alphas_reduce.grad.clone()
     else:
         self.reduce_grad+=self.model.alphas_reduce.grad
+    self.optimizer.step()
 
   def print_arch_grad(self):
     logging.info("normal_alphas grad: ")
@@ -188,7 +189,7 @@ class Architect(object):
     params, offset = {}, 0
     if idx is None:
       model_dict = self.model.state_dict()
-      for i, (k, v) in enumerate(self.model.named_parameters()):
+      for k, v in self.model.named_parameters():
         v_length = np.prod(v.size())
         params[k] = theta[offset: offset+v_length].view(v.size())
         offset += v_length

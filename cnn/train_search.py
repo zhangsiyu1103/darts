@@ -173,7 +173,7 @@ def main():
 
 
 
-    if not args.darts and epoch % args.grow_freq == 0 and epoch <= args.epochs-10 and not epoch == 0:
+    if not args.darts and epoch % args.grow_freq == 0 and epoch < args.epochs-10 and not epoch == 0:
       train_indices_grow = np.random.choice(train_indices, train_grow, replace = False)
       valid_indices_grow = np.random.choice(valid_indices, valid_grow, replace = False)
 
@@ -199,7 +199,7 @@ def main():
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
           optimizer, args.grow_freq, eta_min=args.learning_rate_min)
 
-    if epoch == args.epochs-10:
+    if not args.darts and epoch == args.epochs-10:
       for param_group in optimizer.param_groups:
         param_group["lr"] = 0.01
         param_group["initial_lr"] = 0.01
@@ -208,7 +208,7 @@ def main():
       #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
       #    optimizer, 10.0, eta_min=args.learning_rate_min)
       scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                 optimizer, 15, eta_min=args.learning_rate_min)
+                 optimizer, 10, eta_min=args.learning_rate_min)
 
 
       #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
