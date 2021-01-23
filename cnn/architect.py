@@ -65,14 +65,14 @@ class Architect(object):
     if not darts:
       self.model.alphas_normal.grad *= self.model.normal_indicator
       self.model.alphas_reduce.grad *= self.model.reduce_indicator
-    if not hasattr(self,"normal_grad") or self.normal_grad is None:
-        self.normal_grad = self.model.alphas_normal.grad.clone()
-    else:
-        self.normal_grad+=self.model.alphas_normal.grad
-    if not hasattr(self,"reduce_grad") or self.reduce_grad is None:
-        self.reduce_grad = self.model.alphas_reduce.grad.clone()
-    else:
-        self.reduce_grad+=self.model.alphas_reduce.grad
+      if not hasattr(self,"normal_grad") or self.normal_grad is None:
+          self.normal_grad = self.model.alphas_normal.grad.clone()
+      else:
+          self.normal_grad+=self.model.alphas_normal.grad
+      if not hasattr(self,"reduce_grad") or self.reduce_grad is None:
+          self.reduce_grad = self.model.alphas_reduce.grad.clone()
+      else:
+          self.reduce_grad+=self.model.alphas_reduce.grad
     self.optimizer.step()
 
   def print_arch_grad(self):

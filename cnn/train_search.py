@@ -158,7 +158,8 @@ def main():
     logging.info('train_acc %f', train_acc)
     train_e = time.time()
     t_record["train"]+=(train_e-train_s)
-    architect.print_arch_grad()
+    if not args.darts:
+        architect.print_arch_grad()
 
     #scheduler update
     scheduler.step()

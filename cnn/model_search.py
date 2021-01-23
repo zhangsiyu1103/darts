@@ -10,7 +10,7 @@ from torch.nn.parameter import Parameter
 import time
 from operations import *
 from torch.autograd import Variable
-from genotypes import PRIMITIVES
+from genotypes import PRIMITIVES_G,PRIMITIVES_D
 from genotypes import Genotype
 from utils import indicator, mask_softmax
 
@@ -20,11 +20,19 @@ t_record["forward_soft_max"] = 0
 
 class MixedOp(nn.Module):
 
-  def __init__(self, C, stride):
+  def __init__(self, C, stride, darts):
     super(MixedOp, self).__init__()
     self._ops = nn.ModuleList()
     self.C = C
     self.stride = stride
+    self.darts = darts
+    if self.darts:
+      PRIMITIVES = PRIMITIVES_D
+      OPS = OPS_D
+    else:
+      PRIMITIVES = PRIMITIVES_G
+      OPS = OPS_G
+
     for primitive in PRIMITIVES:
       op = OPS[primitive](C, stride, False)
       if 'pool' in primitive:
@@ -37,6 +45,12 @@ class MixedOp(nn.Module):
     #if grow:
     #    return sum(w * op(x) for w, op in zip(weights, self._ops))
     #return sum(w * op(x) for w, op in zip(weights, self._ops) if not (w==0 or torch.isnan(w)))
+    if self.darts:
+      PRIMITIVES = PRIMITIVES_D
+      OPS = OPS_D
+    else:
+      PRIMITIVES = PRIMITIVES_G
+      OPS = OPS_G
     ret = 0
     for i in range(len(weights)):
       if weights[i] == 0 and not grow:
@@ -59,10 +73,10 @@ class MixedOp(nn.Module):
 
 class Cell(nn.Module):
 
-  def __init__(self, steps, multiplier, C_prev_prev, C_prev, C, reduction, reduction_prev):
+  def __init__(self, steps, multiplier, C_prev_prev, C_prev, C, reduction, reduction_prev, darts):
     super(Cell, self).__init__()
     self.reduction = reduction
-
+    self.darts = darts
     if reduction_prev:
       self.preprocess0 = FactorizedReduce(C_prev_prev, C, affine=False)
     else:
@@ -76,7 +90,7 @@ class Cell(nn.Module):
     for i in range(self._steps):
       for j in range(2+i):
         stride = 2 if reduction and j < 2 else 1
-        op = MixedOp(C, stride)
+        op = MixedOp(C, stride, darts)
         self._ops.append(op)
 
   def forward(self, s0, s1, weights, grow = False):
@@ -131,7 +145,7 @@ class Network(nn.Module):
         reduction = True
       else:
         reduction = False
-      cell = Cell(steps, multiplier, C_prev_prev, C_prev, C_curr, reduction, reduction_prev)
+      cell = Cell(steps, multiplier, C_prev_prev, C_prev, C_curr, reduction, reduction_prev, darts)
       reduction_prev = reduction
       self.cells += [cell]
       C_prev_prev, C_prev = C_prev, multiplier*C_curr
@@ -187,6 +201,10 @@ class Network(nn.Module):
     #num of connection
     k = sum(1 for i in range(self._steps) for n in range(2+i))
     #num of operation per connection
+    if self.darts:
+      PRIMITIVES = PRIMITIVES_D
+    else:
+      PRIMITIVES = PRIMITIVES_G
     num_ops = len(PRIMITIVES)
     all_ops = k * num_ops
     if self.darts:
@@ -294,6 +312,12 @@ class Network(nn.Module):
     return self._arch_parameters
 
   def genotype(self):
+    if self.darts:
+      PRIMITIVES = PRIMITIVES_D
+      OPS = OPS_D
+    else:
+      PRIMITIVES = PRIMITIVES_G
+      OPS = OPS_G
 
     def _parse(weights):
       gene = []
@@ -302,14 +326,16 @@ class Network(nn.Module):
       for i in range(self._steps):
         end = start + n
         W = weights[start:end].copy()
-        #edges = sorted(range(i + 2), key=lambda x: -max(W[x][k] for k in range(len(W[x])) if k != PRIMITIVES.index('none')))[:2]
-        edges = sorted(range(i + 2), key=lambda x: -max(W[x][k] for k in range(len(W[x])) ))[:2]
+        if self.darts:
+          edges = sorted(range(i + 2), key=lambda x: -max(W[x][k] for k in range(len(W[x])) if k != PRIMITIVES.index('none')))[:2]
+        else:
+          edges = sorted(range(i + 2), key=lambda x: -max(W[x][k] for k in range(len(W[x])) ))[:2]
         for j in edges:
           k_best = None
           for k in range(len(W[j])):
-            #if k != PRIMITIVES.index('none'):
-            if k_best is None or W[j][k] > W[j][k_best]:
-              k_best = k
+            if (self.darts and if k != PRIMITIVES.index('none')) or not self.darts:
+              if k_best is None or W[j][k] > W[j][k_best]:
+                k_best = k
           gene.append((PRIMITIVES[k_best], j))
         start = end
         n += 1
