@@ -20,9 +20,10 @@ from architect import Architect
 
 parser = argparse.ArgumentParser("cifar")
 parser.add_argument('--data', type=str, default='../data', help='location of the data corpus')
-parser.add_argument('--batch_size', type=int, default=96, help='batch size')
-parser.add_argument('--grow_batch_size', type=int, default=96, help='batch size')
+parser.add_argument('--batch_size', type=int, default=45, help='batch size')
+parser.add_argument('--grow_batch_size', type=int, default=45, help='batch size')
 parser.add_argument('--learning_rate', type=float, default=0.025, help='init learning rate')
+parser.add_argument('--learning_rate_middle', type=float, default=0.01, help='min learning rate')
 parser.add_argument('--learning_rate_min', type=float, default=0.001, help='min learning rate')
 parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
 parser.add_argument('--weight_decay', type=float, default=3e-4, help='weight decay')
@@ -44,7 +45,7 @@ parser.add_argument('--grow_freq', type=int, default=5, help='frequency of growi
 parser.add_argument('--num_grow', type=int, default=4, help='number of edges activated each time grows')
 
 parser.add_argument('--unrolled', action='store_true', default=False, help='use one-step unrolled validation loss')
-parser.add_argument('--arch_learning_rate', type=float, default=1e-2, help='learning rate for arch encoding')
+parser.add_argument('--arch_learning_rate', type=float, default=3e-4, help='learning rate for arch encoding')
 parser.add_argument('--arch_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
 parser.add_argument('--darts', action='store_true', default=False, help='use original darts code')
 parser.add_argument('--sample', action='store_true', default=False, help='whether use sampled dataset')
@@ -194,9 +195,9 @@ def main():
       t_record["grow"]+=(grow_e-grow_s)
       if epoch > 0:
         for param_group in optimizer.param_groups:
-          param_group["lr"] = 0.05
-          param_group["initial_lr"] = 0.05
-        optimizer.defaults["lr"]=0.05
+          param_group["lr"] = args.learning_rate_middle
+          param_group["initial_lr"] = args.learning_rate_middle
+        optimizer.defaults["lr"] = args.learning_rate_middle
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
           optimizer, args.grow_freq, eta_min=args.learning_rate_min)
 

@@ -44,10 +44,8 @@ class MixedOp(nn.Module):
     #whether to include 0
     #if grow:
     #    return sum(w * op(x) for w, op in zip(weights, self._ops))
-    #return sum(w * op(x) for w, op in zip(weights, self._ops) if not (w==0 or torch.isnan(w)))
     if self.darts:
-      PRIMITIVES = PRIMITIVES_D
-      OPS = OPS_D
+      return sum(w * op(x) for w, op in zip(weights, self._ops) if not (w==0 or torch.isnan(w)))
     else:
       PRIMITIVES = PRIMITIVES_G
       OPS = OPS_G
@@ -333,7 +331,7 @@ class Network(nn.Module):
         for j in edges:
           k_best = None
           for k in range(len(W[j])):
-            if (self.darts and if k != PRIMITIVES.index('none')) or not self.darts:
+            if (self.darts and k != PRIMITIVES.index('none')) or not self.darts:
               if k_best is None or W[j][k] > W[j][k_best]:
                 k_best = k
           gene.append((PRIMITIVES[k_best], j))
