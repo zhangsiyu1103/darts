@@ -4,7 +4,7 @@ from operations import *
 from torch.autograd import Variable
 from utils import drop_path
 
-
+OPS = OPS_D
 class Cell(nn.Module):
 
   def __init__(self, genotype, C_prev_prev, C_prev, C, reduction, reduction_prev):

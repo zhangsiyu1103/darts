@@ -65,8 +65,8 @@ class MixedOp(nn.Module):
       #  self._ops[i] = op
       self._ops[i] = self._ops[i].to(x.device)
       ret += weights[i]*self._ops[i](x)
-    for i in range(len(weights)):
-      self._ops[i] = self._ops[i].to(x.device)
+    #for i in range(len(weights)):
+    #  self._ops[i] = self._ops[i].to(x.device)
     return ret
 
 class Cell(nn.Module):
