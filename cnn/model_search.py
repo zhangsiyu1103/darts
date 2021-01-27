@@ -18,14 +18,33 @@ t_record={}
 t_record["cell_forward"] = 0
 t_record["forward_soft_max"] = 0
 
+def channel_shuffle(x, groups):
+    batchsize, num_channels, height, width = x.data.size()
+
+    channels_per_group = num_channels // groups
+
+    # reshape
+    x = x.view(batchsize, groups, 
+        channels_per_group, height, width)
+
+    x = torch.transpose(x, 1, 2).contiguous()
+
+    # flatten
+    x = x.view(batchsize, -1, height, width)
+
+    return x
+
 class MixedOp(nn.Module):
 
-  def __init__(self, C, stride, darts):
+  def __init__(self, C, stride, darts, pc):
     super(MixedOp, self).__init__()
     self._ops = nn.ModuleList()
+    self.mp = nn.MaxPool2d(2,2)
+    self.k = 4
     self.C = C
     self.stride = stride
     self.darts = darts
+    self.pc = pc
     if self.darts:
       PRIMITIVES = PRIMITIVES_D
       OPS = OPS_D
@@ -34,47 +53,53 @@ class MixedOp(nn.Module):
       OPS = OPS_G
 
     for primitive in PRIMITIVES:
-      op = OPS[primitive](C, stride, False)
+      if pc:
+        op = OPS[primitive](C//self.k, stride, False)
+      else:
+        op = OPS[primitive](C, stride, False)
       if 'pool' in primitive:
-        op = nn.Sequential(op, nn.BatchNorm2d(C, affine=False))
+        if pc:
+          op = nn.Sequential(op, nn.BatchNorm2d(C // self.k, affine=False))
+        else:
+          op = nn.Sequential(op, nn.BatchNorm2d(C, affine=False))
       self._ops.append(op)
       #self._ops.append(None)
 
   def forward(self, x, weights, grow = False):
-    #whether to include 0
-    #if grow:
-    #    return sum(w * op(x) for w, op in zip(weights, self._ops))
+    if self.pc:
+      dim_2 = x.shape[1]
+      xtemp = x[ : , :  dim_2//self.k, :, :]
+      xtemp2 = x[ : ,  dim_2//self.k:, :, :] 
+      x = xtemp
     if self.darts:
-      return sum(w * op(x) for w, op in zip(weights, self._ops) if not (w==0 or torch.isnan(w)))
+      ret =  sum(w * op(x) for w, op in zip(weights, self._ops) if not (w==0 or torch.isnan(w)))
     else:
       PRIMITIVES = PRIMITIVES_G
       OPS = OPS_G
-    ret = 0
-    for i in range(len(weights)):
-      if weights[i] == 0 and not grow:
-        #if self._ops[i] is not None:
-        self._ops[i] = self._ops[i].cpu()
-        continue
-      #if self._ops[i] == None:
-      #  primitive = PRIMITIVES[i]
-      #  op = OPS[primitive](self.C, self.stride, False)
-      #  if 'pool' in primitive:
-      #    op = nn.Sequential(op, nn.BatchNorm2d(self.C, affine=False))
-      #  #print(x.device== torch.device("cuda:0"))
-      #  #op = op.to(x.device)
-      #  self._ops[i] = op
-      self._ops[i] = self._ops[i].to(x.device)
-      ret += weights[i]*self._ops[i](x)
+      ret = 0
+      for i in range(len(weights)):
+        if weights[i] == 0 and not grow:
+          self._ops[i] = self._ops[i].cpu()
+          continue
+        self._ops[i] = self._ops[i].to(x.device)
+        ret += weights[i]*self._ops[i](x)
     #for i in range(len(weights)):
     #  self._ops[i] = self._ops[i].to(x.device)
+    if self.pc:
+      if ret.shape[2] == xtemp2.shape[2]:
+        ret = torch.cat([ret, xtemp2], dim=1)
+      else:
+        ret = torch.cat([ret, self.mp(xtemp2)], dim=1)
+      ret = channel_shuffle(ret, self.k)
     return ret
 
 class Cell(nn.Module):
 
-  def __init__(self, steps, multiplier, C_prev_prev, C_prev, C, reduction, reduction_prev, darts):
+  def __init__(self, steps, multiplier, C_prev_prev, C_prev, C, reduction, reduction_prev, darts, pc):
     super(Cell, self).__init__()
     self.reduction = reduction
     self.darts = darts
+    self.pc = pc
     if reduction_prev:
       self.preprocess0 = FactorizedReduce(C_prev_prev, C, affine=False)
     else:
@@ -88,17 +113,20 @@ class Cell(nn.Module):
     for i in range(self._steps):
       for j in range(2+i):
         stride = 2 if reduction and j < 2 else 1
-        op = MixedOp(C, stride, darts)
+        op = MixedOp(C, stride, darts, pc)
         self._ops.append(op)
 
-  def forward(self, s0, s1, weights, grow = False):
+  def forward(self, s0, s1, weights, grow = False, weights2 = None):
     s0 = self.preprocess0(s0)
     s1 = self.preprocess1(s1)
 
     states = [s0, s1]
     offset = 0
     for i in range(self._steps):
-      s = sum(self._ops[offset+j](h, weights[offset+j], grow) for j, h in enumerate(states))
+      if weights2 is not None:
+        s = sum(weights2[offset+j]*self._ops[offset+j](h, weights[offset+j], grow) for j, h in enumerate(states))
+      else:
+        s = sum(self._ops[offset+j](h, weights[offset+j], grow) for j, h in enumerate(states))
       offset += len(states)
       states.append(s)
     output = []
@@ -118,7 +146,7 @@ class Cell(nn.Module):
 
 class Network(nn.Module):
 
-  def __init__(self, C, num_classes, layers, criterion, steps=4, multiplier=4, stem_multiplier=3, darts = False):
+  def __init__(self, C, num_classes, layers, criterion, steps=4, multiplier=4, stem_multiplier=3, darts = False, pc =False):
     super(Network, self).__init__()
     self._C = C
     self._num_classes = num_classes
@@ -127,6 +155,7 @@ class Network(nn.Module):
     self._steps = steps
     self._multiplier = multiplier
     self.darts = darts
+    self.pc = pc
 
     C_curr = stem_multiplier*C
     self.stem = nn.Sequential(
@@ -143,7 +172,7 @@ class Network(nn.Module):
         reduction = True
       else:
         reduction = False
-      cell = Cell(steps, multiplier, C_prev_prev, C_prev, C_curr, reduction, reduction_prev, darts)
+      cell = Cell(steps, multiplier, C_prev_prev, C_prev, C_curr, reduction, reduction_prev, darts, pc)
       reduction_prev = reduction
       self.cells += [cell]
       C_prev_prev, C_prev = C_prev, multiplier*C_curr
@@ -174,6 +203,16 @@ class Network(nn.Module):
           weights = F.softmax(self.alphas_reduce, dim=-1)
         else:
           weights = mask_softmax(self.alphas_reduce, self.reduce_indicator, dim=-1)
+        if self.pc:
+          n = 3
+          start = 2
+          weights2 = F.softmax(self.beta_reduce[0:2], dim = -1)
+          for j in range(self._steps-1):
+            end = start + n
+            tw2 = F.softmax(self.beta_reduce[start:end], dim = -1)
+            start = end
+            n += 1
+            weights2 = torch.cat([weights2, tw2], dim = -1)
         #print("weights")
         #print(weights)
       else:
@@ -183,9 +222,22 @@ class Network(nn.Module):
           weights = F.softmax(self.alphas_normal, dim=-1)
         else:
           weights = mask_softmax(self.alphas_normal, self.normal_indicator, dim=-1)
+        if self.pc:
+          n = 3
+          start = 2
+          weights2 = F.softmax(self.beta_normal[0:2], dim = -1)
+          for j in range(self._steps-1):
+            end = start + n
+            tw2 = F.softmax(self.beta_normal[start:end], dim = -1)
+            start = end
+            n += 1
+            weights2 = torch.cat([weights2, tw2], dim = -1)
         #print("weights")
         #print(weights)
-      s0, s1 = s1, cell(s0, s1, weights, grow)
+      if self.pc:
+        s0, s1 = s1, cell(s0, s1, weights, grow, weights2 = weights2)
+      else:
+        s0, s1 = s1, cell(s0, s1, weights, grow)
     out = self.global_pooling(s1)
     logits = self.classifier(out.view(out.size(0),-1))
     return logits
@@ -232,12 +284,25 @@ class Network(nn.Module):
 
       self.alphas_normal.requires_grad_()
       self.alphas_reduce.requires_grad_()
+      if self.pc:
+        self.beta_normal = 1e-3*torch.randn(k).cuda()
+        self.beta_reduce = 1e-3*torch.randn(k).cuda()
+        self.beta_normal.requires_grad_()
+        self.beta_reduce.requires_grad_()
       #self.alphas_normal = Variable(alphas_normal, requires_grad=True)
       #self.alphas_reduce = Variable(alphas_reduce, requires_grad=True)
-    self._arch_parameters = [
-      self.alphas_normal,
-      self.alphas_reduce,
-    ]
+    if self.pc:
+      self._arch_parameters = [
+        self.alphas_normal,
+        self.alphas_reduce,
+        self.beta_normal,
+        self.beta_reduce,
+      ]
+    else:
+      self._arch_parameters = [
+        self.alphas_normal,
+        self.alphas_reduce,
+      ]
 
 
   # random activation, not in use

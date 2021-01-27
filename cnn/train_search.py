@@ -48,6 +48,7 @@ parser.add_argument('--unrolled', action='store_true', default=False, help='use 
 parser.add_argument('--arch_learning_rate', type=float, default=3e-4, help='learning rate for arch encoding')
 parser.add_argument('--arch_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
 parser.add_argument('--darts', action='store_true', default=False, help='use original darts code')
+parser.add_argument('--pc', action='store_true', default=False, help='whether to use partial channell')
 parser.add_argument('--sample', action='store_true', default=False, help='whether use sampled dataset')
 args = parser.parse_args()
 
@@ -86,7 +87,7 @@ def main():
 
   criterion = nn.CrossEntropyLoss()
   criterion = criterion.cuda()
-  model = Network(args.init_channels, CIFAR_CLASSES, args.layers, criterion, darts = args.darts)
+  model = Network(args.init_channels, CIFAR_CLASSES, args.layers, criterion, darts = args.darts, pc = args.pc)
   model = model.cuda()
   logging.info("param size = %fMB", utils.count_parameters_in_MB(model))
 
