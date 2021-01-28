@@ -27,7 +27,7 @@ parser.add_argument('--learning_rate_middle', type=float, default=0.05, help='mi
 parser.add_argument('--learning_rate_min', type=float, default=0.001, help='min learning rate')
 parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
 parser.add_argument('--weight_decay', type=float, default=3e-4, help='weight decay')
-parser.add_argument('--report_freq', type=float, default=60, help='report frequency')
+parser.add_argument('--report_freq', type=float, default=50, help='report frequency')
 parser.add_argument('--gpu', type=int, default=0, help='gpu device id')
 parser.add_argument('--epochs', type=int, default=50, help='num of training epochs')
 parser.add_argument('--init_channels', type=int, default=16, help='num of init channels')
@@ -63,7 +63,8 @@ fh.setFormatter(logging.Formatter(log_format))
 logging.getLogger().addHandler(fh)
 
 t_record={"train":0, "grow":0, "grow_search":0}
-
+t_record["input"]=0
+t_record["step"]=0
 CIFAR_CLASSES = 10
 
 train_time = 0
@@ -272,40 +273,34 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr, 
     n = input.size(0)
 
     input = input.cuda()
-    target = target.cuda()
+    target = target.cuda(non_blocking = True)
 
     # get a random minibatch from the search queue with replacement
     input_search, target_search = next(iter(valid_queue))
     input_search = input_search.cuda()
-    target_search = target_search.cuda()
+    target_search = target_search.cuda(non_blocking = True)
     if epoch > args.grow_freq:
       architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled, darts = args.darts)
     #train_time
     optimizer.zero_grad()
+    start = time.time()
     logits = model(input)
+    middle = time.time()
     loss = criterion(logits, target)
 
     loss.backward()
     nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-    #for g in optimizer.param_groups:
-    #    for p in g["params"]:
-    #        if p.grad is None:
-    #            print("here")
-    #            continue
-    #        #else:
-    #        #    print(p.grad)
-    #        #print(p.grad.device)
     optimizer.step()
-
+    end = time.time()
     prec1, prec5 = utils.accuracy(logits, target, topk=(1, 5))
     objs.update(loss.item(), n)
     top1.update(prec1.item(), n)
     top5.update(prec5.item(), n)
-    #t_record["arch"]+=(train_start-arch_start)
-    #t_record["train"]+=(end-train_start)
+    t_record["input"]+=(middle-start)
+    t_record["step"]+=(end-middle)
     #model.random_activate()
 
-    #torch.save(t_record, "train_time.pth")
+    torch.save(t_record, "train_time_g.pth")
     if step % args.report_freq == 0:
       logging.info('train %03d %e %f %f', step, objs.avg, top1.avg, top5.avg)
     end = time.time()

@@ -15,7 +15,7 @@ from genotypes import Genotype
 from utils import indicator, mask_softmax
 
 t_record={}
-t_record["cell_forward"] = 0
+t_record["forward"] = 0
 t_record["forward_soft_max"] = 0
 
 def channel_shuffle(x, groups):
@@ -66,13 +66,14 @@ class MixedOp(nn.Module):
       #self._ops.append(None)
 
   def forward(self, x, weights, grow = False):
+    #s = time.time()
     if self.pc:
       dim_2 = x.shape[1]
       xtemp = x[ : , :  dim_2//self.k, :, :]
       xtemp2 = x[ : ,  dim_2//self.k:, :, :]
       x = xtemp
     if self.darts:
-      ret =  sum(w * op(x) for w, op in zip(weights, self._ops) if not (w==0 or torch.isnan(w)))
+      ret =  sum(w * op(x) for w, op in zip(weights, self._ops))
     else:
       PRIMITIVES = PRIMITIVES_G
       OPS = OPS_G
@@ -91,6 +92,7 @@ class MixedOp(nn.Module):
       else:
         ret = torch.cat([ret, self.mp(xtemp2)], dim=1)
       ret = channel_shuffle(ret, self.k)
+    #e = time.time()
     return ret
 
 class Cell(nn.Module):
@@ -123,25 +125,28 @@ class Cell(nn.Module):
     states = [s0, s1]
     offset = 0
     for i in range(self._steps):
+      start = time.time()
       if weights2 is not None:
         s = sum(weights2[offset+j]*self._ops[offset+j](h, weights[offset+j], grow) for j, h in enumerate(states))
       else:
         s = sum(self._ops[offset+j](h, weights[offset+j], grow) for j, h in enumerate(states))
+      end = time.time()
+      t_record["forward"] += (end-start)
       offset += len(states)
       states.append(s)
-    output = []
+    #output = []
 
     # append zero if no output
-    for x in states[-self._multiplier:]:
-      if torch.is_tensor(x):
-        zero = torch.zeros_like(x)
-    for x in states[-self._multiplier:]:
-      if torch.is_tensor(x):
-        output.append(x)
-      else:
-        output.append(zero)
-
-    return torch.cat(output, dim=1)
+    #for x in states[-self._multiplier:]:
+    #  if torch.is_tensor(x):
+    #    zero = torch.zeros_like(x)
+    #for x in states[-self._multiplier:]:
+    #  if torch.is_tensor(x):
+    #    output.append(x)
+    #  else:
+    #    output.append(zero)
+    return torch.cat(states[-self._multiplier:], dim=1)
+    #return torch.cat(output, dim=1)
 
 
 class Network(nn.Module):
@@ -196,9 +201,6 @@ class Network(nn.Module):
     s0 = s1 = self.stem(input)
     for i, cell in enumerate(self.cells):
       if cell.reduction:
-        #print("reduce")
-        #print(self.alphas_reduce)
-        #print(self.reduce_indicator)
         if self.darts:
           weights = F.softmax(self.alphas_reduce, dim=-1)
         else:
@@ -213,11 +215,7 @@ class Network(nn.Module):
             start = end
             n += 1
             weights2 = torch.cat([weights2, tw2], dim = -1)
-        #print("weights")
-        #print(weights)
       else:
-        #print("normal")
-        #print(self.alphas_normal)
         if self.darts:
           weights = F.softmax(self.alphas_normal, dim=-1)
         else:
@@ -232,14 +230,13 @@ class Network(nn.Module):
             start = end
             n += 1
             weights2 = torch.cat([weights2, tw2], dim = -1)
-        #print("weights")
-        #print(weights)
       if self.pc:
         s0, s1 = s1, cell(s0, s1, weights, grow, weights2 = weights2)
       else:
         s0, s1 = s1, cell(s0, s1, weights, grow)
     out = self.global_pooling(s1)
     logits = self.classifier(out.view(out.size(0),-1))
+    torch.save(t_record, "critical.pth")
     return logits
 
   def _loss(self, input, target, grow=False):
@@ -284,14 +281,11 @@ class Network(nn.Module):
 
       self.alphas_normal.requires_grad_()
       self.alphas_reduce.requires_grad_()
-      if self.pc:
-        self.beta_normal = 1e-3*torch.randn(k).cuda()
-        self.beta_reduce = 1e-3*torch.randn(k).cuda()
-        self.beta_normal.requires_grad_()
-        self.beta_reduce.requires_grad_()
-      #self.alphas_normal = Variable(alphas_normal, requires_grad=True)
-      #self.alphas_reduce = Variable(alphas_reduce, requires_grad=True)
     if self.pc:
+      self.beta_normal = 1e-3*torch.randn(k).cuda()
+      self.beta_reduce = 1e-3*torch.randn(k).cuda()
+      self.beta_normal.requires_grad_()
+      self.beta_reduce.requires_grad_()
       self._arch_parameters = [
         self.alphas_normal,
         self.alphas_reduce,
