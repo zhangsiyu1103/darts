@@ -20,9 +20,9 @@ from architect import Architect
 
 parser = argparse.ArgumentParser("cifar")
 parser.add_argument('--data', type=str, default='../data', help='location of the data corpus')
-parser.add_argument('--batch_size', type=int, default=48, help='batch size')
-parser.add_argument('--grow_batch_size', type=int, default=48, help='batch size')
-parser.add_argument('--learning_rate', type=float, default=0.025, help='init learning rate')
+parser.add_argument('--batch_size', type=int, default=256, help='batch size')
+parser.add_argument('--grow_batch_size', type=int, default=256, help='batch size')
+parser.add_argument('--learning_rate', type=float, default=0.05, help='init learning rate')
 parser.add_argument('--learning_rate_middle', type=float, default=0.05, help='min learning rate')
 parser.add_argument('--learning_rate_min', type=float, default=0.001, help='min learning rate')
 parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
@@ -42,7 +42,7 @@ parser.add_argument('--grad_clip', type=float, default=5, help='gradient clippin
 parser.add_argument('--train_portion', type=float, default=0.5, help='portion of training data')
 parser.add_argument('--grow_portion', type=float, default=1.0, help='portion of training data for grow')
 parser.add_argument('--grow_freq', type=int, default=5, help='frequency of growing')
-parser.add_argument('--num_grow', type=int, default=4, help='number of edges activated each time grows')
+parser.add_argument('--num_grow', type=int, default=5, help='number of edges activated each time grows')
 
 parser.add_argument('--unrolled', action='store_true', default=False, help='use one-step unrolled validation loss')
 parser.add_argument('--arch_learning_rate', type=float, default=3e-4, help='learning rate for arch encoding')
@@ -156,11 +156,11 @@ def main():
 
     # training
     train_s = time.time()
-    train_acc, train_obj = train(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
+    train_acc, train_obj = train(train_queue, valid_queue, model, architect, criterion, optimizer, lr, epoch)
     logging.info('train_acc %f', train_acc)
     train_e = time.time()
     t_record["train"]+=(train_e-train_s)
-    if not args.darts:
+    if not args.darts and epoch > args.grow_freq:
         architect.print_arch_grad()
 
     #scheduler update
@@ -200,7 +200,7 @@ def main():
           param_group["initial_lr"] = args.learning_rate_middle
         optimizer.defaults["lr"] = args.learning_rate_middle
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-          optimizer, args.grow_freq, eta_min=args.learning_rate_min)
+          optimizer, args.grow_freq - 1, eta_min=args.learning_rate_min)
 
     if not args.darts and epoch == args.epochs-10:
       for param_group in optimizer.param_groups:
@@ -259,7 +259,7 @@ def grow(train_queue, valid_queue, model, architect, criterion, optimizer, lr, n
 
   print("grow done")
 
-def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
+def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr, epoch):
   objs = utils.AvgrageMeter()
   top1 = utils.AvgrageMeter()
   top5 = utils.AvgrageMeter()
@@ -278,7 +278,8 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
     input_search, target_search = next(iter(valid_queue))
     input_search = input_search.cuda()
     target_search = target_search.cuda()
-    architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled, darts = args.darts)
+    if epoch > args.grow_freq:
+      architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled, darts = args.darts)
     #train_time
     optimizer.zero_grad()
     logits = model(input)

@@ -24,7 +24,7 @@ def channel_shuffle(x, groups):
     channels_per_group = num_channels // groups
 
     # reshape
-    x = x.view(batchsize, groups, 
+    x = x.view(batchsize, groups,
         channels_per_group, height, width)
 
     x = torch.transpose(x, 1, 2).contiguous()
@@ -69,7 +69,7 @@ class MixedOp(nn.Module):
     if self.pc:
       dim_2 = x.shape[1]
       xtemp = x[ : , :  dim_2//self.k, :, :]
-      xtemp2 = x[ : ,  dim_2//self.k:, :, :] 
+      xtemp2 = x[ : ,  dim_2//self.k:, :, :]
       x = xtemp
     if self.darts:
       ret =  sum(w * op(x) for w, op in zip(weights, self._ops) if not (w==0 or torch.isnan(w)))
@@ -382,13 +382,17 @@ class Network(nn.Module):
       PRIMITIVES = PRIMITIVES_G
       OPS = OPS_G
 
-    def _parse(weights):
+    def _parse(weights, weights2 = None):
       gene = []
       n = 2
       start = 0
       for i in range(self._steps):
         end = start + n
         W = weights[start:end].copy()
+        if self.pc:
+          W2 = weights2[start:end].copy()
+          for j in range(n):
+            W[j, :] = W[i, :] * W2[j]
         if self.darts:
           edges = sorted(range(i + 2), key=lambda x: -max(W[x][k] for k in range(len(W[x])) if k != PRIMITIVES.index('none')))[:2]
         else:
@@ -403,15 +407,28 @@ class Network(nn.Module):
         start = end
         n += 1
       return gene
+    if self.pc:
+      n = 3
+      start = 2
+      weightsn2 = F.softmax(self.beta_normal[0:2], dim = -1)
+      weightsr2 = F.softmax(self.beta_reduce[0:2], dim = -1)
+      for j in range(self._steps-1):
+        end = start + n
+        tw2 = F.softmax(self.beta_reduce[start:end], dim = -1)
+        tn2 = F.softmax(self.beta_normal[start:end], dim = -1)
+        start = end
+        n += 1
+        weightsr2 = torch.cat([weightsr2, tw2], dim = -1)
+        weightsn2 = torch.cat([weightsn2, tn2], dim = -1)
 
-    #alphas_normal = self.alphas_normal.to_dense()
-    #alphas_reduce = self.alphas_reduce.to_dense()
-    #alphas_normal = torch.where(torch.isnan(self.alphas_normal),torch.FloatTensor([float("-inf")]).cuda(),self.alphas_normal)
-    #alphas_reduce = torch.where(torch.isnan(self.alphas_reduce), torch.FloatTensor([float("-inf")]).cuda(), self.alphas_reduce)
     alphas_normal = torch.where(self.alphas_normal == 0,torch.FloatTensor([float("-inf")]).cuda(),self.alphas_normal)
     alphas_reduce = torch.where(self.alphas_reduce == 0, torch.FloatTensor([float("-inf")]).cuda(), self.alphas_reduce)
-    gene_normal = _parse(F.softmax(alphas_normal, dim=-1).data.cpu().numpy())
-    gene_reduce = _parse(F.softmax(alphas_reduce, dim=-1).data.cpu().numpy())
+    if self.pc:
+      gene_normal = _parse(F.softmax(alphas_normal, dim=-1).data.cpu().numpy(), weightsn2.data.cpu().numpy())
+      gene_reduce = _parse(F.softmax(alphas_reduce, dim=-1).data.cpu().numpy(), weightsr2.data.cpu().numpy())
+    else:
+      gene_normal = _parse(F.softmax(alphas_normal, dim=-1).data.cpu().numpy())
+      gene_reduce = _parse(F.softmax(alphas_reduce, dim=-1).data.cpu().numpy())
 
     concat = range(2+self._steps-self._multiplier, self._steps+2)
     genotype = Genotype(
