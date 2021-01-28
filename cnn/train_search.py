@@ -25,6 +25,7 @@ parser.add_argument('--grow_batch_size', type=int, default=256, help='batch size
 parser.add_argument('--learning_rate', type=float, default=0.05, help='init learning rate')
 parser.add_argument('--learning_rate_middle', type=float, default=0.05, help='min learning rate')
 parser.add_argument('--learning_rate_min', type=float, default=0.001, help='min learning rate')
+parser.add_argument('--learning_rate_stable', type=float, default=0.01, help='min learning rate')
 parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
 parser.add_argument('--weight_decay', type=float, default=3e-4, help='weight decay')
 parser.add_argument('--report_freq', type=float, default=50, help='report frequency')
@@ -172,8 +173,9 @@ def main():
 
 
     # validation
-    valid_acc, valid_obj = infer(valid_queue, model, criterion)
-    logging.info('valid_acc %f', valid_acc)
+    if epoch > 47:
+      valid_acc, valid_obj = infer(valid_queue, model, criterion)
+      logging.info('valid_acc %f', valid_acc)
 
 
 
@@ -201,13 +203,13 @@ def main():
           param_group["initial_lr"] = args.learning_rate_middle
         optimizer.defaults["lr"] = args.learning_rate_middle
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-          optimizer, args.grow_freq - 1, eta_min=args.learning_rate_min)
+          optimizer, args.grow_freq, eta_min=args.learning_rate_stable)
 
     if not args.darts and epoch == args.epochs-10:
       for param_group in optimizer.param_groups:
-        param_group["lr"] = 0.01
-        param_group["initial_lr"] = 0.01
-      optimizer.defaults["lr"]=0.01
+        param_group["lr"] = args.learning_rate_stable
+        param_group["initial_lr"] = args.learning_rate_stable
+      optimizer.defaults["lr"]=args.learning_rate_stable
       #scheduler = None
       #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
       #    optimizer, 10.0, eta_min=args.learning_rate_min)
