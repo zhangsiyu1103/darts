@@ -164,7 +164,7 @@ def main():
     logging.info('train_acc %f', train_acc)
     train_e = time.time()
     t_record["train"]+=(train_e-train_s)
-    if not args.darts and epoch > args.grow_freq:
+    if not args.darts and epoch > args.init:
         architect.print_arch_grad()
 
     #scheduler update
