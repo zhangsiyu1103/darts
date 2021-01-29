@@ -32,6 +32,8 @@ parser.add_argument('--report_freq', type=float, default=50, help='report freque
 parser.add_argument('--gpu', type=int, default=0, help='gpu device id')
 parser.add_argument('--epochs', type=int, default=50, help='num of training epochs')
 parser.add_argument('--init_channels', type=int, default=16, help='num of init channels')
+parser.add_argument('--init', type=int, default=10, help='num of init epochs')
+parser.add_argument('--final', type=int, default=15, help='num of init epochs')
 parser.add_argument('--layers', type=int, default=8, help='total number of layers')
 parser.add_argument('--model_path', type=str, default='saved_models', help='path to save the model')
 parser.add_argument('--cutout', action='store_true', default=False, help='use cutout')
@@ -179,7 +181,7 @@ def main():
 
 
 
-    if not args.darts and epoch % args.grow_freq == 0 and epoch < args.epochs-10 and not epoch == 0:
+    if not args.darts and epoch % args.grow_freq == 0 and epoch < args.epochs-args.final and epoch >= args.init:
       train_indices_grow = np.random.choice(train_indices, train_grow, replace = False)
       valid_indices_grow = np.random.choice(valid_indices, valid_grow, replace = False)
 
@@ -197,15 +199,14 @@ def main():
       grow(train_grow_queue, valid_grow_queue, model, architect, criterion, optimizer, lr, args.num_grow)
       grow_e = time.time()
       t_record["grow"]+=(grow_e-grow_s)
-      if epoch > 0:
-        for param_group in optimizer.param_groups:
-          param_group["lr"] = args.learning_rate_middle
-          param_group["initial_lr"] = args.learning_rate_middle
-        optimizer.defaults["lr"] = args.learning_rate_middle
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-          optimizer, args.grow_freq, eta_min=args.learning_rate_stable)
+      for param_group in optimizer.param_groups:
+        param_group["lr"] = args.learning_rate_middle
+        param_group["initial_lr"] = args.learning_rate_middle
+      optimizer.defaults["lr"] = args.learning_rate_middle
+      scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, args.grow_freq, eta_min=args.learning_rate_stable)
 
-    if not args.darts and epoch == args.epochs-10:
+    if not args.darts and epoch == args.epochs-args.final:
       for param_group in optimizer.param_groups:
         param_group["lr"] = args.learning_rate_stable
         param_group["initial_lr"] = args.learning_rate_stable
@@ -214,7 +215,7 @@ def main():
       #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
       #    optimizer, 10.0, eta_min=args.learning_rate_min)
       scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                 optimizer, 10, eta_min=args.learning_rate_min)
+                 optimizer, args.final, eta_min=args.learning_rate_min)
 
 
       #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -281,7 +282,7 @@ def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr, 
     input_search, target_search = next(iter(valid_queue))
     input_search = input_search.cuda()
     target_search = target_search.cuda(non_blocking = True)
-    if epoch > args.grow_freq:
+    if epoch > args.init:
       architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled, darts = args.darts)
     #train_time
     optimizer.zero_grad()
