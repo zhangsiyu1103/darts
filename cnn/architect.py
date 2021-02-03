@@ -73,6 +73,7 @@ class Architect(object):
           self.reduce_grad = self.model.alphas_reduce.grad.clone()
       else:
           self.reduce_grad+=self.model.alphas_reduce.grad
+    nn.utils.clip_grad_norm_(self.model.arch_parameters(), 5)
     self.optimizer.step()
 
   def print_arch_grad(self):
